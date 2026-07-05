@@ -1,0 +1,32 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "${TABLECAST_PORT:-8000}:8000"
+    environment:
+      TABLECAST_SECRET_KEY: ${TABLECAST_SECRET_KEY:?set in .env}
+      TABLECAST_WORKER_TOKEN: ${TABLECAST_WORKER_TOKEN:?set in .env}
+      TABLECAST_REGISTRATION_OPEN: ${TABLECAST_REGISTRATION_OPEN:-true}
+    volumes:
+      - tablecast_data:/data
+    restart: unless-stopped
+
+  # Transcription worker (downloads the Whisper model on first start).
+  # To run without transcription: docker compose up backend
+  worker:
+    build: ./worker
+    environment:
+      TABLECAST_BACKEND_URL: http://backend:8000
+      TABLECAST_WORKER_TOKEN: ${TABLECAST_WORKER_TOKEN:?set in .env}
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
+      WHISPER_COMPUTE: ${WHISPER_COMPUTE:-int8}
+    volumes:
+      - whisper_models:/models
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  tablecast_data:
+  whisper_models:

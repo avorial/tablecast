@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}{{ game.title }} — Tablecast{% endblock %}
+{% block main_class %}room-layout{% endblock %}
+{% block content %}
+{% if game.status == "scheduled" %}
+<div class="card auth-card">
+  <h1>{{ game.title }}</h1>
+  <p class="muted">Campaign: {{ campaign.name }}
+    {% if game.scheduled_at %} · scheduled {{ game.scheduled_at.strftime("%Y-%m-%d %H:%M") }}{% endif %}
+  </p>
+  {% if is_gm %}
+  <form method="post" action="/sessions/{{ game.id }}/start">
+    <button class="primary big">Start session</button>
+  </form>
+  {% else %}
+  <p>Waiting for the GM to start the session. Refresh once it begins.</p>
+  {% endif %}
+  <p><a href="/campaigns/{{ campaign.id }}">← Back to campaign</a></p>
+</div>
+{% else %}
+<div id="room"
+     data-session-id="{{ game.id }}"
+     data-user-id="{{ user.id }}"
+     data-user-name="{{ user.name }}"
+     data-is-gm="{{ '1' if is_gm else '0' }}">
+
+  <aside class="panel left">
+    <h2>{{ game.title }}</h2>
+    <p class="muted small">{{ campaign.name }}</p>
+    <div id="rec-status" class="rec-status">● not recording</div>
+    <h3>Voice</h3>
+    <div id="voice-status" class="muted small">connecting…</div>
+    <ul id="participants" class="plain"></ul>
+    <div class="btn-row">
+      <button id="btn-mute">Mute</button>
+      <button id="btn-deafen">Deafen</button>
+    </div>
+    <div id="audio-sinks"></div>
+
+    {% if is_gm %}
+    <h3>GM controls</h3>
+    <div class="btn-row">
+      <button id="btn-record" class="primary">Start recording</button>
+    </div>
+    <h3>Scene markers</h3>
+    <div class="marker-grid">
+      <button class="marker" data-label="Combat starts">⚔️ Combat starts</button>
+      <button class="marker" data-label="Break">☕ Break</button>
+      <button class="marker" data-label="Important reveal">❗ Important reveal</button>
+      <button class="marker" data-label="NPC introduced">🧙 NPC introduced</button>
+      <button class="marker" data-label="Lore drop">📜 Lore drop</button>
+      <button class="marker" data-label="End scene">🎬 End scene</button>
+    </div>
+    <form method="post" action="/sessions/{{ game.id }}/end" class="stack-top"
+          onsubmit="return confirm('End the session? This stops recording and builds the archive.')">
+      <button class="danger">End session</button>
+    </form>
+    {% endif %}
+  </aside>
+
+  <section class="panel center">
+    <h3>Live transcript</h3>
+    <div id="transcript" class="scroll"></div>
+  </section>
+
+  <aside class="panel right">
+    <h3>Chat &amp; dice</h3>
+    <div id="chat" class="scroll"></div>
+    <form id="chat-form">
+      <input id="chat-input" autocomplete="off"
+             placeholder="Message, or /roll 2d6+3, adv, dis">
+      <button class="primary">Send</button>
+    </form>
+    <div class="btn-row dice-row">
+      <button class="die" data-expr="d20">d20</button>
+      <button class="die" data-expr="d12">d12</button>
+      <button class="die" data-expr="d10">d10</button>
+      <button class="die" data-expr="d8">d8</button>
+      <button class="die" data-expr="d6">d6</button>
+      <button class="die" data-expr="d4">d4</button>
+      <button class="die" data-expr="adv">adv</button>
+      <button class="die" data-expr="dis">dis</button>
+    </div>
+  </aside>
+</div>
+<script src="/static/room.js"></script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Register — Tablecast{% endblock %}
+{% block content %}
+<div class="card auth-card">
+  <h1>Create account</h1>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post" action="/register">
+    <label>Display name <input type="text" name="name" required autofocus maxlength="80"></label>
+    <label>Email <input type="email" name="email" required></label>
+    <label>Password <input type="password" name="password" required minlength="8"></label>
+    <button class="primary">Register</button>
+  </form>
+  <p class="muted">Already have an account? <a href="/login">Log in</a></p>
+</div>
+{% endblock %}
