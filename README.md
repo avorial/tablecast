@@ -9,7 +9,12 @@ makes the session itself the source of truth: run your game in a browser voice
 room, and walk away with speaker-labeled audio tracks, a transcript, scene
 markers, the dice log, and a wiki-ready Markdown page.
 
-See [ROADMAP.md](ROADMAP.md) for where this is going.
+Planning docs:
+
+- [ROADMAP.md](ROADMAP.md) — the five-phase plan and what's in Phase 1
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — components, data model, protocols, pipelines
+- [docs/DECISIONS.md](docs/DECISIONS.md) — why it's built this way (ADRs)
+- [docs/BACKLOG.md](docs/BACKLOG.md) — prioritized next actions per phase
 
 ## Quick start
 
