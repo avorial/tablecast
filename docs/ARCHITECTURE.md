@@ -127,15 +127,41 @@ blocks the queue.
 - Authorization: every session/campaign route resolves membership
   (`require_member` / `require_session_member`); GM-only actions checked
   server-side both in HTTP routes and WS dispatch.
-- Worker API: constant-time shared-token comparison; disabled entirely if
-  `TABLECAST_WORKER_TOKEN` is unset.
+- Worker API: constant-time shared-token comparison against `WORKER_TOKEN`.
+  It's reachable on the published port (same FastAPI app as everything
+  else), so it's a real secret, not an internal-network-only one — see
+  ADR-8 for how it gets a per-deployment value without requiring the
+  operator to set anything.
 - Browsers require HTTPS (or localhost) for `getUserMedia` — production
   deployments sit behind a TLS reverse proxy that forwards WebSockets.
+
+## Secrets and zero-config deployment
+
+`TABLECAST_SECRET_KEY` (cookie signing) and `TABLECAST_WORKER_TOKEN` (worker
+auth) are both optional. If unset, `config.py`'s `_persisted_secret` generates
+a random one on first boot and persists it — `SECRET_KEY` to
+`DATA_DIR/.secret_key`, `WORKER_TOKEN` to `SHARED_DIR/.worker_token` — so the
+stack deploys with no environment configuration at all (this is what makes
+it pastable directly into Portainer, which doesn't load a `.env` file next
+to `docker-compose.yml` the way the `docker compose` CLI does). Restarting a
+container reuses the persisted value; only recreating the volume rotates it.
+
+The worker needs the *same* token as the backend but must not share the
+backend's `/data` volume (ADR-4). Compose adds one narrow exception: a small
+`worker_secrets` volume mounted read-write on the backend and read-only on
+the worker, carrying only the `.worker_token` handoff file — never
+session/audio data. `worker/transcribe.py`'s `resolve_token()` polls for that
+file if `TABLECAST_WORKER_TOKEN` isn't set in its own environment.
+
+Set either variable explicitly if you want it independent of the volumes
+(e.g. running the worker on a separate host, or wanting cookies to survive a
+volume recreation).
 
 ## Storage layout (`/data` volume)
 
 ```
 /data/tablecast.db                          SQLite (WAL)
+/data/.secret_key                            auto-generated cookie-signing key (if not set via env)
 /data/audio/session_<id>/chunks/<user>/NNNNNN.webm
 /data/audio/session_<id>/<Speaker>.ogg
 /data/audio/session_<id>/mixed.mp3

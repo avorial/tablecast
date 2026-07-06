@@ -5,7 +5,12 @@ with faster-whisper, and posts the segments back. Stateless: run one or many.
 
 Env:
   TABLECAST_BACKEND_URL   e.g. http://backend:8000
-  TABLECAST_WORKER_TOKEN  shared secret (must match the backend)
+  TABLECAST_WORKER_TOKEN  shared secret (must match the backend). If unset,
+                          the worker waits for the backend to auto-generate
+                          one and hand it over via TABLECAST_SHARED_DIR —
+                          see config.py's _persisted_secret on the backend.
+  TABLECAST_SHARED_DIR    volume shared read-only with the backend, used only
+                          to pick up the auto-generated token (default: /shared)
   WHISPER_MODEL           tiny | base | small | medium | large-v3  (default: base)
   WHISPER_DEVICE          cpu | cuda        (default: cpu)
   WHISPER_COMPUTE         int8 | float16 …  (default: int8)
@@ -15,6 +20,7 @@ import logging
 import os
 import tempfile
 import time
+from pathlib import Path
 
 import httpx
 from faster_whisper import WhisperModel
@@ -23,13 +29,24 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("tablecast.worker")
 
 BACKEND = os.environ.get("TABLECAST_BACKEND_URL", "http://backend:8000").rstrip("/")
-TOKEN = os.environ.get("TABLECAST_WORKER_TOKEN", "")
+SHARED_TOKEN_FILE = Path(os.environ.get("TABLECAST_SHARED_DIR", "/shared")) / ".worker_token"
 MODEL_NAME = os.environ.get("WHISPER_MODEL", "base")
 DEVICE = os.environ.get("WHISPER_DEVICE", "cpu")
 COMPUTE = os.environ.get("WHISPER_COMPUTE", "int8")
 
 POLL_INTERVAL = 2.0
-HEADERS = {"X-Worker-Token": TOKEN}
+HEADERS: dict[str, str] = {}
+
+
+def resolve_token() -> str:
+    token = os.environ.get("TABLECAST_WORKER_TOKEN", "")
+    if token:
+        return token
+    log.info("TABLECAST_WORKER_TOKEN not set; waiting for the backend to "
+              "generate one at %s …", SHARED_TOKEN_FILE)
+    while not SHARED_TOKEN_FILE.exists():
+        time.sleep(2)
+    return SHARED_TOKEN_FILE.read_text().strip()
 
 
 def wait_for_backend(client: httpx.Client) -> None:
@@ -73,8 +90,7 @@ def process(client: httpx.Client, model: WhisperModel, job: dict) -> None:
 
 
 def main() -> None:
-    if not TOKEN:
-        raise SystemExit("TABLECAST_WORKER_TOKEN is required")
+    HEADERS["X-Worker-Token"] = resolve_token()
 
     log.info("loading whisper model %r (%s/%s)…", MODEL_NAME, DEVICE, COMPUTE)
     model = WhisperModel(MODEL_NAME, device=DEVICE, compute_type=COMPUTE)
