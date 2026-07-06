@@ -25,7 +25,8 @@
   let deafened = false;
 
   // ---- recording state ----
-  let recording = false;
+  let recording = false;      // this client is capturing its own mic
+  let roomRecording = false;  // the session-wide recording clock is running
   let recorder = null;
   let chunkTimer = null;
   let seq = 0;
@@ -52,15 +53,32 @@
   }
 
   // ---------------- microphone ----------------
+  let micError = "";
+
   async function initMic() {
+    // getUserMedia only exists in secure contexts (HTTPS or localhost) —
+    // over plain http:// on a LAN IP the whole API is missing.
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      micError =
+        "Microphone blocked: browsers only allow mic access over HTTPS or on " +
+        "localhost. Open Tablecast via https:// (reverse proxy) or a localhost " +
+        "tunnel — voice and recording are disabled until then.";
+      $("voice-status").textContent = "mic blocked — needs HTTPS or localhost";
+      appendChat(el("p", "error small", micError));
+      return;
+    }
     try {
       micStream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true },
       });
       $("voice-status").textContent = "mic ready";
     } catch (err) {
-      $("voice-status").textContent =
-        "mic unavailable (" + err.name + ") — voice and recording disabled";
+      micError =
+        err.name === "NotAllowedError"
+          ? "Microphone permission denied — allow mic access for this site and reload."
+          : "Microphone unavailable (" + err.name + ") — voice and recording disabled.";
+      $("voice-status").textContent = "mic unavailable (" + err.name + ")";
+      appendChat(el("p", "error small", micError));
     }
   }
 
@@ -142,7 +160,15 @@
   }
 
   function startRecording(startedAtIso) {
-    if (recording || !micStream) return;
+    if (recording) return;
+    if (!micStream) {
+      // The room is recording, but this participant can't contribute audio.
+      $("rec-status").textContent = "● room recording — your mic is off";
+      $("rec-status").classList.add("on");
+      if (IS_GM) $("btn-record").textContent = "Stop recording";
+      if (micError) appendChat(el("p", "error small", "You are NOT being recorded. " + micError));
+      return;
+    }
     recording = true;
     recordingStartEpoch = startedAtIso ? Date.parse(startedAtIso) : Date.now();
     seq = 0;
@@ -173,7 +199,13 @@
   }
 
   function stopRecording() {
-    if (!recording) return;
+    if (!recording) {
+      // Mic-less clients still show the room-level indicator; clear it.
+      $("rec-status").textContent = "● not recording";
+      $("rec-status").classList.remove("on");
+      if (IS_GM) $("btn-record").textContent = "Start recording";
+      return;
+    }
     recording = false;
     clearInterval(chunkTimer);
     if (recorder && recorder.state === "recording") recorder.stop();
@@ -234,9 +266,16 @@
     if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(obj));
   }
 
+  let wsEverConnected = false;
+  let wsWarned = false;
+
   function connect() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
     socket = new WebSocket(`${proto}://${location.host}/ws/sessions/${SESSION_ID}`);
+
+    socket.onopen = () => {
+      wsEverConnected = true;
+    };
 
     socket.onmessage = (event) => {
       const msg = JSON.parse(event.data);
@@ -244,7 +283,10 @@
         case "peers":
           renderParticipants([{ user_id: MY_ID, name: root.dataset.userName, muted }, ...msg.peers]);
           for (const p of msg.peers) newPeer(p.user_id, true); // newcomer initiates
-          if (msg.recording_active) startRecording(msg.recording_started_at);
+          if (msg.recording_active) {
+            roomRecording = true;
+            startRecording(msg.recording_started_at);
+          }
           break;
         case "presence":
           renderParticipants(msg.peers);
@@ -279,7 +321,8 @@
           msg.segments.forEach(addTranscript);
           break;
         case "record":
-          if (msg.action === "start") startRecording(msg.recording_started_at);
+          roomRecording = msg.action === "start";
+          if (roomRecording) startRecording(msg.recording_started_at);
           else stopRecording();
           break;
         case "ended": {
@@ -303,6 +346,15 @@
 
     socket.onclose = () => {
       $("voice-status").textContent = "disconnected — retrying…";
+      if (!wsEverConnected && !wsWarned) {
+        wsWarned = true;
+        appendChat(el("p", "error small",
+          "Can't reach the session server — the WebSocket connection is being " +
+          "blocked. If Tablecast is behind a reverse proxy, enable WebSocket " +
+          "support for this host (e.g. Nginx Proxy Manager: edit the proxy " +
+          "host and toggle on \"Websockets Support\"). Chat, voice, dice, and " +
+          "recording all need this connection."));
+      }
       for (const id of [...peers.keys()]) closePeer(id);
       setTimeout(connect, 2000);
     };
@@ -343,7 +395,10 @@
 
   if (IS_GM) {
     $("btn-record").addEventListener("click", () => {
-      send({ type: "record", action: recording ? "stop" : "start" });
+      if (!recording && !micStream && micError) {
+        appendChat(el("p", "error small", micError));
+      }
+      send({ type: "record", action: roomRecording ? "stop" : "start" });
     });
   }
 
