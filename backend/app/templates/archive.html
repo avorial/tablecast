@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}{{ game.title }} (archive) — Tablecast{% endblock %}
+{% block content %}
+<p><a href="/campaigns/{{ campaign.id }}">← {{ campaign.name }}</a></p>
+<h1>{{ game.title }}</h1>
+<p class="muted">
+  {% if game.started_at %}{{ game.started_at.strftime("%Y-%m-%d %H:%M") }}{% endif %}
+  {% if attendees %} · Attending: {{ attendees | join(", ") }}{% endif %}
+</p>
+
+<div class="two-col">
+  <div>
+    <div class="card">
+      <h2>Transcript</h2>
+      {% for seg in segments %}
+        <p><strong>{{ seg.user.name }}</strong>
+           <span class="muted small">[{{ "%02d:%02d" | format((seg.start_s // 60) | int, (seg.start_s % 60) | int) }}]</span>
+           {{ seg.text }}</p>
+      {% else %}
+        <p class="muted">No transcript. Run the transcription worker to get one for future sessions.</p>
+      {% endfor %}
+    </div>
+
+    <div class="card">
+      <h2>Events</h2>
+      {% for e in events %}
+        {% if e.kind == "marker" %}
+          <p>🎬 <strong>{{ e.payload.label }}</strong>{% if e.payload.note %} — {{ e.payload.note }}{% endif %}</p>
+        {% elif e.kind == "roll" %}
+          <p>🎲 {{ e.user }} rolled <strong>{{ e.payload.expression }}</strong> → <strong>{{ e.payload.total }}</strong></p>
+        {% elif e.kind == "chat" %}
+          <p><strong>{{ e.user }}:</strong> {{ e.payload.text }}</p>
+        {% elif e.kind == "system" %}
+          <p class="muted">— {{ e.payload.text }} —</p>
+        {% endif %}
+      {% else %}
+        <p class="muted">No events recorded.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>Downloads</h2>
+      {% if not game.recordings_ready %}
+        <p class="muted">Audio is still processing — refresh in a minute.</p>
+      {% endif %}
+      <ul class="plain">
+        {% for r in recordings %}
+        <li>🔊 <a href="/sessions/{{ game.id }}/recordings/{{ r.id }}">{{ r.filename }}</a>
+            <span class="badge">{{ r.kind }}</span></li>
+        {% endfor %}
+        <li>📄 <a href="/sessions/{{ game.id }}/export.md">Markdown summary</a></li>
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Campaigns — Tablecast{% endblock %}
+{% block content %}
+<h1>Your campaigns</h1>
+
+<div class="grid">
+  {% for m in memberships %}
+  <a class="card campaign-card" href="/campaigns/{{ m.campaign.id }}">
+    <h2>{{ m.campaign.name }}</h2>
+    <p class="muted">{{ m.campaign.description or "No description" }}</p>
+    <span class="badge">{{ "GM" if m.role == "gm" else "Player" }}</span>
+  </a>
+  {% else %}
+  <p class="muted">No campaigns yet — create one or join with an invite code.</p>
+  {% endfor %}
+</div>
+
+<div class="two-col">
+  <div class="card">
+    <h2>New campaign</h2>
+    <form method="post" action="/campaigns">
+      <label>Name <input type="text" name="name" required maxlength="120"></label>
+      <label>Description <textarea name="description" rows="2"></textarea></label>
+      <button class="primary">Create campaign</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Join a campaign</h2>
+    <form method="post" action="/campaigns/join">
+      <label>Invite code <input type="text" name="join_code" required></label>
+      <button>Join</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

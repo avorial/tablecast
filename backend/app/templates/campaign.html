@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}{{ campaign.name }} — Tablecast{% endblock %}
+{% block content %}
+<p><a href="/">← Campaigns</a></p>
+<h1>{{ campaign.name }}</h1>
+<p class="muted">{{ campaign.description }}</p>
+
+<div class="two-col">
+  <div>
+    <div class="card">
+      <h2>Upcoming &amp; live</h2>
+      {% for s in upcoming %}
+        <div class="session-row">
+          <a href="/sessions/{{ s.id }}"><strong>{{ s.title }}</strong></a>
+          <span class="badge {{ 'live' if s.status == 'live' }}">{{ s.status }}</span>
+          {% if s.scheduled_at %}<span class="muted">{{ s.scheduled_at.strftime("%Y-%m-%d %H:%M") }}</span>{% endif %}
+        </div>
+      {% else %}
+        <p class="muted">Nothing scheduled.</p>
+      {% endfor %}
+      {% if member.role == "gm" %}
+      <form method="post" action="/campaigns/{{ campaign.id }}/sessions" class="stack-top">
+        <label>Session title <input type="text" name="title" required maxlength="200"></label>
+        <label>When (optional) <input type="datetime-local" name="scheduled_at"></label>
+        <button class="primary">Schedule session</button>
+      </form>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Session archive</h2>
+      {% for s in past %}
+        <div class="session-row">
+          <a href="/sessions/{{ s.id }}"><strong>{{ s.title }}</strong></a>
+          {% if s.started_at %}<span class="muted">{{ s.started_at.strftime("%Y-%m-%d") }}</span>{% endif %}
+          {% if not s.recordings_ready %}<span class="badge">processing audio…</span>{% endif %}
+        </div>
+      {% else %}
+        <p class="muted">No past sessions yet.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>Players</h2>
+      <ul class="plain">
+        {% for m in campaign.members %}
+        <li>{{ m.user.name }} <span class="badge">{{ "GM" if m.role == "gm" else "Player" }}</span></li>
+        {% endfor %}
+      </ul>
+      {% if member.role == "gm" %}
+      <p class="muted">Invite code: <code>{{ campaign.join_code }}</code></p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
