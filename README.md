@@ -18,11 +18,9 @@ Planning docs:
 
 ## Quick start
 
-```bash
-cp .env.example .env
-# edit .env — set TABLECAST_SECRET_KEY and TABLECAST_WORKER_TOKEN
-# (openssl rand -hex 32)
+No `.env` file or secrets required — clone and run:
 
+```bash
 # App + live transcription (downloads a Whisper model on first run):
 docker compose up -d --build
 
@@ -30,8 +28,17 @@ docker compose up -d --build
 docker compose up -d --build backend
 ```
 
+This also works as a **Portainer stack**: paste `docker-compose.yml` in
+directly, no environment variables need to be set. Auth cookie signing and
+the worker's internal API token are auto-generated on first boot and
+persisted to their volumes, so they survive restarts.
+
 Open http://localhost:8200, register an account, create a campaign, and share
 the invite code with your table.
+
+Want config beyond the defaults (custom port, closed registration, a bigger
+Whisper model, pinned secrets)? Copy `.env.example` to `.env` and edit it —
+see [Configuration](#configuration) below.
 
 > **Microphone note:** browsers only allow microphone access on `localhost` or
 > over HTTPS. For a real remote game, put Tablecast behind a TLS reverse proxy
@@ -74,17 +81,21 @@ rooms is on the roadmap (Phase 2).
 
 ## Configuration
 
-All via environment variables (see `.env.example`):
+All optional, via environment variables (see `.env.example`):
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `TABLECAST_SECRET_KEY` | — (required) | Signs auth cookies |
-| `TABLECAST_WORKER_TOKEN` | — (required) | Shared secret for the worker API |
+| `TABLECAST_SECRET_KEY` | auto-generated, persisted to the data volume | Signs auth cookies |
+| `TABLECAST_WORKER_TOKEN` | auto-generated, persisted to a shared volume | Shared secret for the worker API |
 | `TABLECAST_PORT` | `8200` | Published port |
 | `TABLECAST_REGISTRATION_OPEN` | `true` | Set `false` to close signups |
 | `WHISPER_MODEL` | `base` | `tiny`/`base`/`small`/`medium`/`large-v3` |
 | `WHISPER_DEVICE` | `cpu` | `cuda` if you have a GPU |
 | `DATABASE_URL` | SQLite on `/data` | Any SQLAlchemy URL (Postgres later) |
+
+Pin `TABLECAST_SECRET_KEY` / `TABLECAST_WORKER_TOKEN` yourself if you want
+them independent of the volumes (e.g. running the worker on a separate host,
+or wanting cookies to survive a volume recreation).
 
 ## Development
 

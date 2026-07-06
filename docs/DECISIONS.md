@@ -87,3 +87,30 @@ build.
 Python only. If the room UI outgrows vanilla JS (Phase 3 waveform/chapter
 editing is the likely trigger), adopt a build step then — the JSON WS
 protocol is already UI-agnostic.
+
+## ADR-8: Secrets are optional — auto-generate and persist, don't hard-require
+
+**Context.** `docker-compose.yml` originally used `${VAR:?set in .env}` for
+`TABLECAST_SECRET_KEY` and `TABLECAST_WORKER_TOKEN`. That's correct for the
+`docker compose` CLI, which reads a `.env` file next to the compose file —
+but it breaks pasting the same file into **Portainer** as a stack, which
+doesn't load that `.env` the same way: the compose file fails to *load* at
+all with "required variable is missing a value," before any container
+starts.
+
+**Decision.** Neither secret is required. `config.py`'s `_persisted_secret`
+returns the env var if set; otherwise it generates one with `secrets.token_hex`
+and persists it to a file (mode `0600`) so restarts reuse it. `SECRET_KEY`
+persists to `DATA_DIR/.secret_key`. `WORKER_TOKEN` persists to
+`SHARED_DIR/.worker_token`, and the worker's `resolve_token()` polls for that
+same file when its own env var is unset.
+
+**Consequences.** The stack now deploys with zero configuration in Portainer,
+plain `docker compose`, or bare `uvicorn` — while every deployment still gets
+a unique, real secret (never a hardcoded default) generated at first boot.
+The one cost is a narrow exception to ADR-4: the worker gets a *tiny*
+read-only volume (`worker_secrets`) shared with the backend, carrying only
+the token handoff file — the worker still fetches all audio and posts all
+results over HTTP, never touching `/data`. Operators who want secrets
+independent of the volumes (multi-host worker, surviving a volume wipe) can
+still set both env vars explicitly, which skips generation entirely.

@@ -4,11 +4,16 @@ services:
     ports:
       - "${TABLECAST_PORT:-8200}:8000"
     environment:
-      TABLECAST_SECRET_KEY: ${TABLECAST_SECRET_KEY:?set in .env}
-      TABLECAST_WORKER_TOKEN: ${TABLECAST_WORKER_TOKEN:?set in .env}
+      # Both secrets are optional: if unset, the backend auto-generates and
+      # persists one on first boot (see app/config.py). Set them explicitly
+      # if you want secrets independent of the data volume, e.g. so cookies
+      # survive a volume recreation.
+      TABLECAST_SECRET_KEY: ${TABLECAST_SECRET_KEY:-}
+      TABLECAST_WORKER_TOKEN: ${TABLECAST_WORKER_TOKEN:-}
       TABLECAST_REGISTRATION_OPEN: ${TABLECAST_REGISTRATION_OPEN:-true}
     volumes:
       - tablecast_data:/data
+      - worker_secrets:/shared
     restart: unless-stopped
 
   # Transcription worker (downloads the Whisper model on first start).
@@ -17,12 +22,16 @@ services:
     build: ./worker
     environment:
       TABLECAST_BACKEND_URL: http://backend:8000
-      TABLECAST_WORKER_TOKEN: ${TABLECAST_WORKER_TOKEN:?set in .env}
+      # Left unset here on purpose: the worker picks up the token the
+      # backend auto-generated via the shared worker_secrets volume. Set
+      # TABLECAST_WORKER_TOKEN on both services if you'd rather pin it
+      # yourself (e.g. running the worker on a separate host).
       WHISPER_MODEL: ${WHISPER_MODEL:-base}
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
       WHISPER_COMPUTE: ${WHISPER_COMPUTE:-int8}
     volumes:
       - whisper_models:/models
+      - worker_secrets:/shared:ro
     depends_on:
       - backend
     restart: unless-stopped
@@ -30,3 +39,6 @@ services:
 volumes:
   tablecast_data:
   whisper_models:
+  # Holds only the auto-generated worker token handoff file — never
+  # session/audio data (kept out of tablecast_data on purpose).
+  worker_secrets:
