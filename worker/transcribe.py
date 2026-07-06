@@ -50,7 +50,15 @@ def process(client: httpx.Client, model: WhisperModel, job: dict) -> None:
     with tempfile.NamedTemporaryFile(suffix=".webm") as tmp:
         tmp.write(audio.content)
         tmp.flush()
-        segments, info = model.transcribe(tmp.name, vad_filter=True)
+        # Chunks are ~20s and independent, so cross-segment conditioning only
+        # invites repetition hallucinations; greedy-only decoding keeps the
+        # temperature-fallback sampler from producing garbage on hard audio.
+        segments, info = model.transcribe(
+            tmp.name,
+            vad_filter=True,
+            condition_on_previous_text=False,
+            temperature=0.0,
+        )
         out = [
             {"start": seg.start, "end": seg.end, "text": seg.text}
             for seg in segments

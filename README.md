@@ -30,7 +30,7 @@ docker compose up -d --build
 docker compose up -d --build backend
 ```
 
-Open http://localhost:8000, register an account, create a campaign, and share
+Open http://localhost:8200, register an account, create a campaign, and share
 the invite code with your table.
 
 > **Microphone note:** browsers only allow microphone access on `localhost` or
@@ -80,7 +80,7 @@ All via environment variables (see `.env.example`):
 |---|---|---|
 | `TABLECAST_SECRET_KEY` | — (required) | Signs auth cookies |
 | `TABLECAST_WORKER_TOKEN` | — (required) | Shared secret for the worker API |
-| `TABLECAST_PORT` | `8000` | Published port |
+| `TABLECAST_PORT` | `8200` | Published port |
 | `TABLECAST_REGISTRATION_OPEN` | `true` | Set `false` to close signups |
 | `WHISPER_MODEL` | `base` | `tiny`/`base`/`small`/`medium`/`large-v3` |
 | `WHISPER_DEVICE` | `cpu` | `cuda` if you have a GPU |

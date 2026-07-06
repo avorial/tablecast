@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -40,8 +41,14 @@ def _ffmpeg(args: list[str]) -> None:
     )
 
 
-def finalize_session_audio(session_id: int) -> None:
-    """Runs in a background thread after the GM ends the session."""
+def finalize_session_audio(session_id: int, delay_s: float = 10.0) -> None:
+    """Runs in a background thread after the GM ends the session.
+
+    Waits briefly first so clients can flush their final recording chunk
+    (accepted during the grace window in the chunk-upload route).
+    """
+    if delay_s > 0:
+        time.sleep(delay_s)
     db: Session = SessionLocal()
     try:
         _finalize(db, session_id)

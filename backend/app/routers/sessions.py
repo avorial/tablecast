@@ -1,5 +1,6 @@
 import json
 import threading
+from datetime import timezone
 from typing import Annotated
 
 from fastapi import (
@@ -21,6 +22,7 @@ from ..db import SessionLocal
 router = APIRouter()
 
 MAX_CHUNK_BYTES = 25 * 1024 * 1024
+CHUNK_GRACE_SECONDS = 60
 
 
 @router.get("/sessions/{session_id}")
@@ -100,7 +102,15 @@ async def upload_chunk(
     offset: Annotated[float, Form()],
 ):
     game, _member = require_session_member(db, session_id, user)
-    if game.status != "live":
+    # Clients flush their last chunk right after the GM ends the session, so
+    # accept uploads for a short grace window while finalization is pending.
+    in_grace = (
+        game.status == "ended"
+        and not game.recordings_ready
+        and game.ended_at is not None
+        and (models.utcnow() - game.ended_at.replace(tzinfo=game.ended_at.tzinfo or timezone.utc)).total_seconds() < CHUNK_GRACE_SECONDS
+    )
+    if game.status != "live" and not in_grace:
         raise HTTPException(409, "Session is not live")
     data = await file.read()
     if len(data) > MAX_CHUNK_BYTES:

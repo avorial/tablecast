@@ -183,21 +183,27 @@
     if (IS_GM) $("btn-record").textContent = "Start recording";
   }
 
+  const pendingUploads = new Set();
+
   async function uploadChunk(blob, chunkSeq, offset, attempt = 0) {
     const form = new FormData();
     form.append("file", blob, `chunk-${chunkSeq}.webm`);
     form.append("seq", String(chunkSeq));
     form.append("offset", String(offset));
-    try {
-      const res = await fetch(`/sessions/${SESSION_ID}/chunks`, { method: "POST", body: form });
-      if (!res.ok) throw new Error("HTTP " + res.status);
-    } catch (err) {
-      if (attempt < 3) {
-        setTimeout(() => uploadChunk(blob, chunkSeq, offset, attempt + 1), 2000 * (attempt + 1));
-      } else {
-        console.error("chunk upload failed permanently", chunkSeq, err);
+    const promise = (async () => {
+      try {
+        const res = await fetch(`/sessions/${SESSION_ID}/chunks`, { method: "POST", body: form });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+      } catch (err) {
+        if (attempt < 3) {
+          setTimeout(() => uploadChunk(blob, chunkSeq, offset, attempt + 1), 2000 * (attempt + 1));
+        } else {
+          console.error("chunk upload failed permanently", chunkSeq, err);
+        }
       }
-    }
+    })();
+    pendingUploads.add(promise);
+    promise.finally(() => pendingUploads.delete(promise));
   }
 
   // ---------------- UI rendering ----------------
@@ -276,11 +282,19 @@
           if (msg.action === "start") startRecording(msg.recording_started_at);
           else stopRecording();
           break;
-        case "ended":
+        case "ended": {
           stopRecording();
-          // Give the last chunk a moment to upload before leaving.
-          setTimeout(() => location.reload(), 1500);
+          // The recorder's onstop fires async; give it a beat to enqueue the
+          // final chunk, then hold the reload until uploads finish.
+          const reload = () => location.reload();
+          setTimeout(() => {
+            Promise.race([
+              Promise.allSettled([...pendingUploads]),
+              new Promise((r) => setTimeout(r, 15000)),
+            ]).then(reload, reload);
+          }, 800);
           break;
+        }
         case "error":
           appendChat(el("p", "error small", msg.message));
           break;

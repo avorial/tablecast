@@ -2,7 +2,7 @@ services:
   backend:
     build: ./backend
     ports:
-      - "${TABLECAST_PORT:-8000}:8000"
+      - "${TABLECAST_PORT:-8200}:8000"
     environment:
       TABLECAST_SECRET_KEY: ${TABLECAST_SECRET_KEY:?set in .env}
       TABLECAST_WORKER_TOKEN: ${TABLECAST_WORKER_TOKEN:?set in .env}
