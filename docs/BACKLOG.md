@@ -44,13 +44,20 @@ Working list, ordered within each bucket. The phase map lives in
 - [ ] Loudness normalization (EBU R128 via `loudnorm`) + silence trimming
 - [ ] Intro/outro slots, chapter markers from scene markers (ID3/MP4 chapters)
 - [ ] Per-speaker WAV export for DAW editing
+- [ ] Prior art: [Craig](https://github.com/CraigChat/craig) (Discord
+      multi-track recorder) — study its "cook" post-processing pipeline
+      (per-track normalization, format conversion, smart mixdown)
 
 ## Phase 4 — Integrations
 
 - [ ] RSS podcast feed
 - [ ] GitHub commit export of session pages
 - [ ] Foundry VTT journal export
-- [ ] Discord import (historical recordings/logs)
+- [ ] Discord import (historical recordings/logs). Target
+      [Craig](https://github.com/CraigChat/craig) multi-track exports as the
+      primary ingest format — per-speaker tracks map 1:1 onto Tablecast's
+      recording model, so old Craig sessions can join the archive and get
+      transcribed like native ones
 - [ ] S3-compatible storage backend
 
 ## Phase 5 — AI assistant
