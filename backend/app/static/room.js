@@ -72,6 +72,7 @@
         audio: { echoCancellation: true, noiseSuppression: true },
       });
       $("voice-status").textContent = "mic ready";
+      watchSelfLevels(micStream);
     } catch (err) {
       micError =
         err.name === "NotAllowedError"
@@ -81,6 +82,84 @@
       appendChat(el("p", "error small", micError));
     }
   }
+
+  // ---------------- audio level meters ----------------
+  // Per-participant VU meters make feedback and audio bleed visible: if two
+  // meters move in lockstep while one person talks, someone's speakers are
+  // leaking into their mic.
+  //
+  // Own mic: WebAudio analyser on the local stream (shows exactly what gets
+  // sent/recorded — drops to zero when muted).
+  // Remote peers: RTCPeerConnection.getStats() inbound audioLevel, which
+  // rides the RTP audio-level header and works even where the browser can't
+  // tap remote audio into WebAudio.
+  let audioCtx = null;
+  let selfMeter = null; // {analyser, data}
+
+  function ensureAudioCtx() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    if (!audioCtx) audioCtx = new AC();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    return audioCtx;
+  }
+
+  // Autoplay policy can leave the context suspended until a user gesture.
+  document.addEventListener("click", () => {
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  });
+
+  function watchSelfLevels(stream) {
+    const ctx = ensureAudioCtx();
+    if (!ctx || !stream.getAudioTracks().length) return;
+    try {
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      selfMeter = { analyser, data: new Uint8Array(analyser.fftSize) };
+    } catch (err) {
+      console.error("self level meter failed", err);
+    }
+  }
+
+  function selfLevel() {
+    selfMeter.analyser.getByteTimeDomainData(selfMeter.data);
+    let peak = 0;
+    for (let i = 0; i < selfMeter.data.length; i++) {
+      const v = Math.abs(selfMeter.data[i] - 128);
+      if (v > peak) peak = v;
+    }
+    return Math.min(1, peak / 128);
+  }
+
+  function setMeter(userId, level) {
+    const fill = document.getElementById("meter-" + userId);
+    if (!fill) return;
+    fill.style.width = Math.round(Math.min(1, level) * 100) + "%";
+    fill.classList.toggle("hot", level > 0.85);
+    const item = fill.closest(".participant");
+    if (item) item.classList.toggle("speaking", level > 0.12);
+  }
+
+  function updateMeters() {
+    if (selfMeter) setMeter(MY_ID, selfLevel());
+    for (const [peerId, pc] of peers) {
+      pc.getStats().then((stats) => {
+        let level = 0;
+        stats.forEach((s) => {
+          if (s.type === "inbound-rtp" && s.kind === "audio" && s.audioLevel !== undefined) {
+            level = Math.max(level, s.audioLevel);
+          }
+        });
+        // audioLevel is linear amplitude; sqrt ≈ perceived loudness so quiet
+        // speech still registers visibly.
+        setMeter(peerId, Math.sqrt(level));
+      }).catch(() => {});
+    }
+  }
+
+  setInterval(updateMeters, 150);
 
   // ---------------- WebRTC mesh ----------------
   function newPeer(peerId, initiator) {
@@ -132,6 +211,7 @@
   function closePeer(peerId) {
     const pc = peers.get(peerId);
     if (pc) { pc.close(); peers.delete(peerId); }
+    setMeter(peerId, 0);
     const audio = document.getElementById("audio-" + peerId);
     if (audio) audio.remove();
   }
@@ -239,14 +319,26 @@
   }
 
   // ---------------- UI rendering ----------------
+  function participantRow(userId, label) {
+    const li = el("li", "participant");
+    li.appendChild(el("span", "p-name", label));
+    const meter = el("div", "meter");
+    const fill = el("div", "meter-fill");
+    fill.id = "meter-" + userId;
+    meter.appendChild(fill);
+    li.appendChild(meter);
+    return li;
+  }
+
   function renderParticipants(peersInfo) {
     participantsList.innerHTML = "";
-    const me = el("li", "participant", root.dataset.userName + " (you)" + (muted ? " 🔇" : ""));
-    participantsList.appendChild(me);
+    participantsList.appendChild(
+      participantRow(MY_ID, root.dataset.userName + " (you)" + (muted ? " 🔇" : ""))
+    );
     for (const p of peersInfo) {
       if (p.user_id === MY_ID) continue;
       participantsList.appendChild(
-        el("li", "participant", p.name + (p.muted ? " 🔇" : ""))
+        participantRow(p.user_id, p.name + (p.muted ? " 🔇" : ""))
       );
     }
     $("voice-status").textContent = `${peersInfo.length} in room`;

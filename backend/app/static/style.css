@@ -95,7 +95,19 @@ ul.plain li { padding: 4px 0; }
 .dice-row .die { padding: 5px 10px; font-size: 0.85rem; }
 .marker-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .marker { font-size: 0.8rem; padding: 6px 4px; }
-.participant { padding: 3px 0; }
+.participant { padding: 3px 0; display: flex; align-items: center; gap: 8px; }
+.p-name { flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.participant.speaking .p-name { color: var(--accent); }
+.meter {
+  flex: 1 1 40px; min-width: 40px; height: 6px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 3px; overflow: hidden;
+}
+.meter-fill {
+  height: 100%; width: 0%;
+  background: #7dc87d; transition: width 80ms linear;
+}
+.meter-fill.hot { background: var(--danger); }
 .rec-status { color: var(--muted); font-weight: 600; margin: 8px 0; }
 .rec-status.on { color: var(--danger); animation: pulse 1.5s infinite; }
 @keyframes pulse { 50% { opacity: 0.5; } }
