@@ -162,11 +162,14 @@
   setInterval(updateMeters, 150);
 
   // ---------------- WebRTC mesh ----------------
+  let iceServers = [{ urls: "stun:stun.l.google.com:19302" }];
+  try {
+    iceServers = JSON.parse(root.dataset.iceServers) || iceServers;
+  } catch (e) { /* fall back to default STUN */ }
+
   function newPeer(peerId, initiator) {
     if (peers.has(peerId)) return peers.get(peerId);
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    });
+    const pc = new RTCPeerConnection({ iceServers });
     peers.set(peerId, pc);
 
     if (micStream) {
@@ -353,6 +356,44 @@
     transcriptBox.scrollTop = transcriptBox.scrollHeight;
   }
 
+  function renderChatLine(msg) {
+    const p = el("p");
+    p.appendChild(el("strong", null, msg.name + ": "));
+    p.appendChild(document.createTextNode(msg.text));
+    appendChat(p);
+  }
+
+  function renderRollLine(msg) {
+    const p = el("p", "roll-line");
+    p.appendChild(el("strong", null, `🎲 ${msg.name} `));
+    p.appendChild(document.createTextNode(
+      `${msg.expression} → ${msg.total} (${msg.rolls.join(", ")})`));
+    appendChat(p);
+  }
+
+  function renderMarkerLine(msg) {
+    appendChat(el("p", "marker-line", `🎬 ${hms(msg.at_seconds)}${msg.label}`));
+  }
+
+  function renderHistory(msg) {
+    // Replayed on every (re)connect — wipe the panes so nothing duplicates.
+    chatBox.innerHTML = "";
+    transcriptBox.innerHTML = "";
+    for (const e of msg.events) {
+      const entry = { name: e.name, at_seconds: e.at_seconds, ...e.payload };
+      if (e.kind === "chat") renderChatLine(entry);
+      else if (e.kind === "roll") renderRollLine(entry);
+      else if (e.kind === "marker") renderMarkerLine(entry);
+      else if (e.kind === "system") appendChat(el("p", "muted small", `— ${e.payload.text} —`));
+    }
+    msg.segments.forEach(addTranscript);
+  }
+
+  function renderTranscribeQueue(pending) {
+    $("transcribe-status").textContent =
+      pending > 0 ? `· transcribing ${pending} chunk${pending === 1 ? "" : "s"}…` : "";
+  }
+
   // ---------------- WebSocket ----------------
   function send(obj) {
     if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(obj));
@@ -391,26 +432,23 @@
         case "rtc":
           onRtc(msg.from, msg.data);
           break;
-        case "chat": {
-          const p = el("p");
-          p.appendChild(el("strong", null, msg.name + ": "));
-          p.appendChild(document.createTextNode(msg.text));
-          appendChat(p);
+        case "history":
+          renderHistory(msg);
           break;
-        }
-        case "roll": {
-          const p = el("p", "roll-line");
-          p.appendChild(el("strong", null, `🎲 ${msg.name} `));
-          p.appendChild(document.createTextNode(
-            `${msg.expression} → ${msg.total} (${msg.rolls.join(", ")})`));
-          appendChat(p);
+        case "chat":
+          renderChatLine(msg);
           break;
-        }
+        case "roll":
+          renderRollLine(msg);
+          break;
         case "marker":
-          appendChat(el("p", "marker-line", `🎬 ${hms(msg.at_seconds)}${msg.label}`));
+          renderMarkerLine(msg);
           break;
         case "transcript":
           msg.segments.forEach(addTranscript);
+          break;
+        case "transcribe_queue":
+          renderTranscribeQueue(msg.pending);
           break;
         case "record":
           roomRecording = msg.action === "start";

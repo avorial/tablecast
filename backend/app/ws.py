@@ -94,6 +94,46 @@ def _store_event(
     return {"at_seconds": event.at_seconds, "created_at": event.created_at.isoformat()}
 
 
+HISTORY_EVENTS = 300
+HISTORY_SEGMENTS = 500
+
+
+def _history(db: Session, game_id: int) -> dict:
+    """Recent room activity, replayed to (re)connecting participants so a
+    reload or late join doesn't land in a blank room."""
+    events = (
+        db.query(models.SessionEvent)
+        .filter(
+            models.SessionEvent.session_id == game_id,
+            models.SessionEvent.kind.in_(("chat", "roll", "marker", "system")),
+        )
+        .order_by(models.SessionEvent.id.desc())
+        .limit(HISTORY_EVENTS)
+        .all()
+    )
+    segments = (
+        db.query(models.TranscriptSegment)
+        .filter_by(session_id=game_id)
+        .order_by(models.TranscriptSegment.id.desc())
+        .limit(HISTORY_SEGMENTS)
+        .all()
+    )
+    return {
+        "type": "history",
+        "events": [
+            {"kind": e.kind, "user_id": e.user_id,
+             "name": e.user.name if e.user else None,
+             "at_seconds": e.at_seconds, "payload": json.loads(e.payload)}
+            for e in reversed(events)
+        ],
+        "segments": [
+            {"user_id": s.user_id, "name": s.user.name,
+             "start_s": s.start_s, "end_s": s.end_s, "text": s.text}
+            for s in reversed(segments)
+        ],
+    }
+
+
 async def handle_room_socket(socket: WebSocket, game_id: int, user: models.User, is_gm: bool):
     room = await manager.get(game_id)
     room.sockets[user.id] = socket
@@ -101,7 +141,7 @@ async def handle_room_socket(socket: WebSocket, game_id: int, user: models.User,
     room.muted.setdefault(user.id, False)
 
     # Tell the newcomer who is already here (they initiate WebRTC offers),
-    # then announce them to the room.
+    # replay recent history, then announce them to the room.
     db = SessionLocal()
     try:
         game = db.get(models.GameSession, game_id)
@@ -114,6 +154,10 @@ async def handle_room_socket(socket: WebSocket, game_id: int, user: models.User,
                 game.recording_started_at.isoformat() if game.recording_started_at else None
             ),
         }))
+        await socket.send_text(json.dumps(_history(db, game_id)))
+        # Presence events drive the attendance list — lurkers count too,
+        # not just people who typed something.
+        _store_event(db, game, user.id, "presence", {"action": "join"})
     finally:
         db.close()
     await room.broadcast(
@@ -135,6 +179,13 @@ async def handle_room_socket(socket: WebSocket, game_id: int, user: models.User,
     finally:
         room.sockets.pop(user.id, None)
         room.names.pop(user.id, None)
+        db = SessionLocal()
+        try:
+            game = db.get(models.GameSession, game_id)
+            if game is not None:
+                _store_event(db, game, user.id, "presence", {"action": "leave"})
+        finally:
+            db.close()
         await room.broadcast(
             {"type": "presence", "action": "leave", "user_id": user.id, "name": user.name,
              "peers": room.presence()}

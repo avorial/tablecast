@@ -97,6 +97,23 @@ Pin `TABLECAST_SECRET_KEY` / `TABLECAST_WORKER_TOKEN` yourself if you want
 them independent of the volumes (e.g. running the worker on a separate host,
 or wanting cookies to survive a volume recreation).
 
+## Backups
+
+Everything lives on the `tablecast_data` volume: the SQLite database, audio
+chunks, finalized recordings, and the auto-generated secrets. To back it up:
+
+```bash
+# Consistent SQLite snapshot + all audio, written to ./tablecast-backup/
+docker compose exec backend sh -c \
+  "python -c \"import sqlite3; sqlite3.connect('/data/tablecast.db').execute('VACUUM INTO \\'/data/backup.db\\'')\""
+docker run --rm -v tablecast_data:/data -v "$PWD/tablecast-backup:/out" alpine \
+  sh -c "cp /data/backup.db /out/ && cp -r /data/audio /out/ && rm /data/backup.db"
+```
+
+Restore by copying the files back into the volume before starting the stack.
+(`VACUUM INTO` produces a consistent copy even while the app is running;
+don't copy `tablecast.db` directly while a session is live.)
+
 ## Development
 
 ```bash

@@ -12,13 +12,44 @@
   <div>
     <div class="card">
       <h2>Transcript</h2>
+      {% if segments %}
+      <div class="filter-row">
+        <input type="search" id="transcript-search" placeholder="Search transcript…">
+        <select id="speaker-filter">
+          <option value="">All speakers</option>
+          {% for s in speakers %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      <div id="transcript-lines">
       {% for seg in segments %}
-        <p><strong>{{ seg.user.name }}</strong>
+        <p data-speaker="{{ seg.name }}"><strong>{{ seg.name }}</strong>
            <span class="muted small">[{{ "%02d:%02d" | format((seg.start_s // 60) | int, (seg.start_s % 60) | int) }}]</span>
            {{ seg.text }}</p>
       {% else %}
         <p class="muted">No transcript. Run the transcription worker to get one for future sessions.</p>
       {% endfor %}
+      </div>
+      {% if segments %}
+      <script>
+        (function () {
+          const search = document.getElementById("transcript-search");
+          const speaker = document.getElementById("speaker-filter");
+          const lines = document.querySelectorAll("#transcript-lines p");
+          function apply() {
+            const q = search.value.trim().toLowerCase();
+            const who = speaker.value;
+            lines.forEach((p) => {
+              const matchText = !q || p.textContent.toLowerCase().includes(q);
+              const matchWho = !who || p.dataset.speaker === who;
+              p.style.display = matchText && matchWho ? "" : "none";
+            });
+          }
+          search.addEventListener("input", apply);
+          speaker.addEventListener("change", apply);
+        })();
+      </script>
+      {% endif %}
     </div>
 
     <div class="card">

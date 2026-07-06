@@ -14,6 +14,33 @@ def _hms(seconds: float | None) -> str:
     return f"{s // 3600:02d}:{s % 3600 // 60:02d}:{s % 60:02d}"
 
 
+# Whisper splits sentences across the ~20s chunk seams; stitch consecutive
+# segments from the same speaker back together when the gap is small.
+STITCH_GAP_S = 2.0
+
+
+def merged_segments(segments: list[models.TranscriptSegment]) -> list[dict]:
+    merged: list[dict] = []
+    for seg in segments:
+        prev = merged[-1] if merged else None
+        if (
+            prev is not None
+            and prev["user_id"] == seg.user_id
+            and seg.start_s - prev["end_s"] <= STITCH_GAP_S
+        ):
+            prev["text"] = f"{prev['text']} {seg.text.strip()}"
+            prev["end_s"] = seg.end_s
+        else:
+            merged.append({
+                "user_id": seg.user_id,
+                "name": seg.user.name,
+                "start_s": seg.start_s,
+                "end_s": seg.end_s,
+                "text": seg.text.strip(),
+            })
+    return merged
+
+
 def session_markdown(db: Session, game: models.GameSession) -> str:
     campaign = game.campaign
     events = (
@@ -89,8 +116,8 @@ def session_markdown(db: Session, game: models.GameSession) -> str:
 
     lines += ["## Transcript", ""]
     if segments:
-        for seg in segments:
-            lines.append(f"**[{_hms(seg.start_s)}] {seg.user.name}:** {seg.text.strip()}")
+        for seg in merged_segments(segments):
+            lines.append(f"**[{_hms(seg['start_s'])}] {seg['name']}:** {seg['text']}")
             lines.append("")
     else:
         lines.append("_No transcript available (transcription worker not running?)._")

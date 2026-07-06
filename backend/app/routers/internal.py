@@ -26,6 +26,32 @@ def _check_token(token: str | None) -> None:
 WorkerToken = Annotated[str | None, Header(alias="X-Worker-Token")]
 
 
+def _initial_prompt(db, session_id: int) -> str:
+    """Vocabulary hint for whisper: campaign proper nouns transcribe far
+    better when they appear in the prompt (Phase 2 will add extracted
+    NPC/location names from earlier sessions here too)."""
+    game = db.get(models.GameSession, session_id)
+    if game is None:
+        return ""
+    campaign = game.campaign
+    names = [m.user.name for m in campaign.members]
+    return (
+        f"Tabletop RPG session of the campaign {campaign.name}, "
+        f"session {game.title}. Players: {', '.join(names)}."
+    )[:400]
+
+
+def pending_count(db, session_id: int) -> int:
+    return (
+        db.query(models.AudioChunk)
+        .filter(
+            models.AudioChunk.session_id == session_id,
+            models.AudioChunk.transcribe_status.in_(("pending", "processing")),
+        )
+        .count()
+    )
+
+
 @router.post("/jobs/claim")
 def claim_job(db: DbDep, token: WorkerToken = None):
     _check_token(token)
@@ -43,6 +69,7 @@ def claim_job(db: DbDep, token: WorkerToken = None):
         "id": chunk.id,
         "session_id": chunk.session_id,
         "offset_s": chunk.offset_s,
+        "initial_prompt": _initial_prompt(db, chunk.session_id),
     }}
 
 
@@ -100,6 +127,9 @@ async def job_result(db: DbDep, chunk_id: int, result: JobResult, token: WorkerT
                 for s in new_segments
             ],
         })
+    await ws.manager.broadcast(chunk.session_id, {
+        "type": "transcribe_queue", "pending": pending_count(db, chunk.session_id),
+    })
     return {"ok": True}
 
 

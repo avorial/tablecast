@@ -15,9 +15,9 @@ from fastapi import (
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 
 from .. import config, models, security, ws
+from ..db import SessionLocal
 from ..deps import DbDep, UserDep, require_session_member, templates
 from ..services import audio, export
-from ..db import SessionLocal
 
 router = APIRouter()
 
@@ -33,7 +33,8 @@ def session_page(request: Request, db: DbDep, user: UserDep, session_id: int):
     return templates.TemplateResponse(
         request, "room.html",
         {"user": user, "game": game, "campaign": game.campaign,
-         "is_gm": member.role == "gm"},
+         "is_gm": member.role == "gm",
+         "ice_servers": json.dumps(config.ICE_SERVERS)},
     )
 
 
@@ -57,11 +58,14 @@ def _archive_page(request, db, user, game, member):
          "at_seconds": e.at_seconds, "payload": json.loads(e.payload)}
         for e in events
     ]
+    merged = export.merged_segments(segments)
+    speakers = sorted({seg["name"] for seg in merged})
     return templates.TemplateResponse(
         request, "archive.html",
         {"user": user, "game": game, "campaign": game.campaign,
          "is_gm": member.role == "gm", "events": parsed_events,
-         "segments": segments, "recordings": recordings, "attendees": attendees},
+         "segments": merged, "speakers": speakers,
+         "recordings": recordings, "attendees": attendees},
     )
 
 
@@ -128,6 +132,10 @@ async def upload_chunk(
         path=str(path), offset_s=max(0.0, offset),
     ))
     db.commit()
+    from .internal import pending_count
+    await ws.manager.broadcast(session_id, {
+        "type": "transcribe_queue", "pending": pending_count(db, session_id),
+    })
     return {"ok": True}
 
 

@@ -3,6 +3,7 @@
 {% block main_class %}room-layout{% endblock %}
 {% block content %}
 {% if game.status == "scheduled" %}
+{% if not is_gm %}<meta http-equiv="refresh" content="7">{% endif %}
 <div class="card auth-card">
   <h1>{{ game.title }}</h1>
   <p class="muted">Campaign: {{ campaign.name }}
@@ -13,7 +14,8 @@
     <button class="primary big">Start session</button>
   </form>
   {% else %}
-  <p>Waiting for the GM to start the session. Refresh once it begins.</p>
+  <p>Waiting for the GM to start the session — this page checks again every
+     few seconds and will drop you into the room automatically.</p>
   {% endif %}
   <p><a href="/campaigns/{{ campaign.id }}">← Back to campaign</a></p>
 </div>
@@ -22,7 +24,8 @@
      data-session-id="{{ game.id }}"
      data-user-id="{{ user.id }}"
      data-user-name="{{ user.name }}"
-     data-is-gm="{{ '1' if is_gm else '0' }}">
+     data-is-gm="{{ '1' if is_gm else '0' }}"
+     data-ice-servers="{{ ice_servers }}">
 
   <aside class="panel left">
     <h2>{{ game.title }}</h2>
@@ -59,7 +62,7 @@
   </aside>
 
   <section class="panel center">
-    <h3>Live transcript</h3>
+    <h3>Live transcript <span id="transcribe-status" class="muted small"></span></h3>
     <div id="transcript" class="scroll"></div>
   </section>
 
