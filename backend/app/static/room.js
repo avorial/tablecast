@@ -208,6 +208,7 @@
       }
       audio.srcObject = e.streams[0];
       audio.muted = deafened || gmDeafened;
+      audio.volume = volumes.get(peerId) ?? 1;
     };
     pc.onconnectionstatechange = () => {
       if (["failed", "closed", "disconnected"].includes(pc.connectionState)) {
@@ -342,29 +343,105 @@
 
   // ---------------- UI rendering ----------------
   let roomPeers = []; // last presence snapshot (for whisper name lookup)
+  let openPanelUid = null; // which participant's panel is expanded
+
+  // Per-person volume, local to this listener, remembered across sessions.
+  const volumes = new Map(); // user_id -> 0..1
+  try {
+    const saved = JSON.parse(localStorage.getItem("tablecast_volumes") || "{}");
+    for (const [k, v] of Object.entries(saved)) volumes.set(Number(k), v);
+  } catch (e) { /* fresh start */ }
+
+  function saveVolumes() {
+    try {
+      localStorage.setItem("tablecast_volumes", JSON.stringify(Object.fromEntries(volumes)));
+    } catch (e) { /* storage full/blocked — volume still applies live */ }
+  }
+
+  function applyVolume(userId) {
+    const audio = document.getElementById("audio-" + userId);
+    if (audio) audio.volume = volumes.get(userId) ?? 1;
+  }
+
+  function userPanel(p) {
+    const panel = el("div", "p-panel");
+
+    const volRow = el("div", "p-panel-row");
+    volRow.appendChild(el("span", "muted small", "🔊"));
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.min = "0";
+    slider.max = "100";
+    slider.value = String(Math.round((volumes.get(p.user_id) ?? 1) * 100));
+    const pct = el("span", "small vol-pct", slider.value + "%");
+    slider.addEventListener("click", (e) => e.stopPropagation());
+    slider.addEventListener("input", () => {
+      volumes.set(p.user_id, Number(slider.value) / 100);
+      pct.textContent = slider.value + "%";
+      applyVolume(p.user_id);
+      saveVolumes();
+    });
+    volRow.appendChild(slider);
+    volRow.appendChild(pct);
+    panel.appendChild(volRow);
+
+    const actions = el("div", "p-panel-row");
+    const whisperBtn = el("button", "mod-btn", "🤫 Whisper");
+    whisperBtn.title = "Send a private message";
+    whisperBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const input = $("chat-input");
+      input.value = `/w ${p.name} `;
+      input.focus();
+    });
+    actions.appendChild(whisperBtn);
+
+    if (IS_GM) {
+      const muteBtn = el("button", "mod-btn",
+        p.gm_muted ? "🔊 Unmute" : "🔇 Mute");
+      muteBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        send({ type: "moderate", target: p.user_id,
+               action: p.gm_muted ? "unmute" : "mute" });
+      });
+      const deafBtn = el("button", "mod-btn",
+        p.gm_deafened ? "🔔 Undeafen" : "🔕 Deafen");
+      deafBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        send({ type: "moderate", target: p.user_id,
+               action: p.gm_deafened ? "undeafen" : "deafen" });
+      });
+      actions.appendChild(muteBtn);
+      actions.appendChild(deafBtn);
+    }
+    panel.appendChild(actions);
+    return panel;
+  }
 
   function participantRow(userId, label, info) {
     const li = el("li", "participant");
-    li.appendChild(el("span", "p-name", label));
+    const header = el("div", "p-header");
+    header.appendChild(el("span", "p-name", label));
     const meter = el("div", "meter");
     const fill = el("div", "meter-fill");
     fill.id = "meter-" + userId;
     meter.appendChild(fill);
-    li.appendChild(meter);
-    // GM moderation buttons on every row except the GM's own
-    if (IS_GM && userId !== MY_ID && info) {
-      const muteBtn = el("button", "mod-btn", info.gm_muted ? "🔊" : "🔇");
-      muteBtn.title = info.gm_muted ? "Unmute this player" : "Mute this player";
-      muteBtn.addEventListener("click", () =>
-        send({ type: "moderate", target: userId,
-               action: info.gm_muted ? "unmute" : "mute" }));
-      const deafBtn = el("button", "mod-btn", info.gm_deafened ? "🔔" : "🔕");
-      deafBtn.title = info.gm_deafened ? "Undeafen this player" : "Deafen this player";
-      deafBtn.addEventListener("click", () =>
-        send({ type: "moderate", target: userId,
-               action: info.gm_deafened ? "undeafen" : "deafen" }));
-      li.appendChild(muteBtn);
-      li.appendChild(deafBtn);
+    header.appendChild(meter);
+    li.appendChild(header);
+
+    // Clicking anyone (except yourself) opens their panel: volume slider,
+    // whisper shortcut, and — for the GM — moderation controls.
+    if (userId !== MY_ID && info) {
+      header.classList.add("clickable");
+      header.title = "Volume, whisper, and controls";
+      header.addEventListener("click", () => {
+        openPanelUid = openPanelUid === userId ? null : userId;
+        renderParticipants(roomPeers);
+      });
+      if (openPanelUid === userId) {
+        li.appendChild(userPanel(info));
+        li.classList.add("open");
+      }
     }
     return li;
   }
