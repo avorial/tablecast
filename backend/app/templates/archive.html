@@ -104,6 +104,12 @@
           <p>🎲 {{ e.user }} rolled <strong>{{ e.payload.expression }}</strong> → <strong>{{ e.payload.total }}</strong></p>
         {% elif e.kind == "chat" %}
           <p><strong>{{ e.user }}:</strong> {{ e.payload.text }}</p>
+        {% elif e.kind == "whisper" %}
+          <p class="whisper-line">🤫 <strong>{{ e.user }} → {{ e.payload.to_name }}:</strong> {{ e.payload.text }}</p>
+        {% elif e.kind == "image" %}
+          <p><strong>{{ e.user }}:</strong>
+            <a href="{{ e.payload.url }}" target="_blank" rel="noopener">
+              <img src="{{ e.payload.url }}" alt="{{ e.payload.filename }}" class="chat-image"></a></p>
         {% elif e.kind == "system" %}
           <p class="muted">— {{ e.payload.text }} —</p>
         {% endif %}

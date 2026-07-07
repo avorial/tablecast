@@ -70,10 +70,12 @@
     <h3>Chat &amp; dice</h3>
     <div id="chat" class="scroll"></div>
     <form id="chat-form">
+      <button type="button" id="btn-attach" title="Share an image (or drag one onto the chat)">📎</button>
       <input id="chat-input" autocomplete="off"
-             placeholder="Message, or /roll 2d6+3, adv, dis">
+             placeholder="Message, /roll 2d6+3, /w Name whisper…">
       <button class="primary">Send</button>
     </form>
+    <input type="file" id="image-input" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
     <div class="btn-row dice-row">
       <button class="die" data-expr="d20">d20</button>
       <button class="die" data-expr="d12">d12</button>

@@ -23,6 +23,13 @@ router = APIRouter()
 
 MAX_CHUNK_BYTES = 25 * 1024 * 1024
 CHUNK_GRACE_SECONDS = 60
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+IMAGE_TYPES = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+}
 
 
 @router.get("/sessions/{session_id}")
@@ -45,6 +52,13 @@ def _archive_page(request, db, user, game, member):
         .order_by(models.SessionEvent.created_at)
         .all()
     )
+    # Whispers are private: only replay the viewer's own.
+    events = [
+        e for e in events
+        if e.kind != "whisper"
+        or e.user_id == user.id
+        or json.loads(e.payload).get("to_user_id") == user.id
+    ]
     segments = (
         db.query(models.TranscriptSegment)
         .filter_by(session_id=game.id)
@@ -212,6 +226,54 @@ async def upload_chunk(
         "type": "transcribe_queue", "pending": pending_count(db, session_id),
     })
     return {"ok": True}
+
+
+@router.post("/sessions/{session_id}/images")
+async def upload_image(db: DbDep, user: UserDep, session_id: int, file: UploadFile):
+    game, _member = require_session_member(db, session_id, user)
+    if game.status != "live":
+        raise HTTPException(409, "Session is not live")
+    ext = IMAGE_TYPES.get(file.content_type or "")
+    if ext is None:
+        raise HTTPException(415, "Only PNG, JPEG, GIF, or WebP images")
+    data = await file.read()
+    if len(data) > MAX_IMAGE_BYTES:
+        raise HTTPException(413, "Image too large (8 MB max)")
+    if not data:
+        raise HTTPException(400, "Empty upload")
+
+    import uuid
+    image_dir = config.DATA_DIR / "uploads" / f"session_{session_id}"
+    image_dir.mkdir(parents=True, exist_ok=True)
+    fname = f"{uuid.uuid4().hex}{ext}"
+    (image_dir / fname).write_bytes(data)
+
+    url = f"/sessions/{session_id}/images/{fname}"
+    original = (file.filename or "image")[:120]
+    event = models.SessionEvent(
+        session_id=session_id, user_id=user.id, kind="image",
+        payload=json.dumps({"url": url, "filename": original}),
+        at_seconds=ws._recording_offset(game),
+    )
+    db.add(event)
+    db.commit()
+    await ws.manager.broadcast(session_id, {
+        "type": "image", "user_id": user.id, "name": user.name,
+        "url": url, "filename": original,
+    })
+    return {"ok": True, "url": url}
+
+
+@router.get("/sessions/{session_id}/images/{fname}")
+def serve_image(db: DbDep, user: UserDep, session_id: int, fname: str):
+    _game, _member = require_session_member(db, session_id, user)
+    # fname is server-generated (uuid + vetted extension); reject anything else
+    if not all(c.isalnum() or c == "." for c in fname) or "/" in fname or ".." in fname:
+        raise HTTPException(404, "Not found")
+    path = config.DATA_DIR / "uploads" / f"session_{session_id}" / fname
+    if not path.is_file():
+        raise HTTPException(404, "Not found")
+    return FileResponse(path)
 
 
 @router.get("/sessions/{session_id}/export.md")

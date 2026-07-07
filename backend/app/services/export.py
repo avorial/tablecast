@@ -141,6 +141,15 @@ def session_markdown(db: Session, game: models.GameSession) -> str:
             lines.append(f"- **{who}:** {payload['text']}")
         lines.append("")
 
+    images = [e for e in events if e.kind == "image"]
+    if images:
+        lines += ["## Handouts", ""]
+        for e in images:
+            payload = json.loads(e.payload)
+            who = e.user.name if e.user else "?"
+            lines.append(f"- {who}: [{payload['filename']}]({payload['url']})")
+        lines.append("")
+
     lines += ["## Transcript", ""]
     if segments:
         for seg in merged_segments(segments):

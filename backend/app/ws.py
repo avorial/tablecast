@@ -1,14 +1,17 @@
 """Session room WebSocket hub.
 
 One socket per participant. Message types (client → server):
-  chat    {text}                      — text chat
-  roll    {expression}                — dice roll
-  marker  {label, note?}              — GM scene marker
-  record  {action: "start"|"stop"}    — GM recording control
-  rtc     {to, data}                  — WebRTC signaling relay (opaque)
-  state   {muted}                     — presence state updates
+  chat     {text}                      — text chat
+  whisper  {to, text}                  — private message to one participant
+  roll     {expression}                — dice roll
+  marker   {label, note?}              — GM scene marker
+  record   {action: "start"|"stop"}    — GM recording control
+  moderate {target, action}            — GM mute/unmute/deafen/undeafen a player
+  rtc      {to, data}                  — WebRTC signaling relay (opaque)
+  state    {muted}                     — presence state updates
 
-Server → client additionally sends: presence, peers, transcript, error.
+Server → client additionally sends: presence, peers, history, transcript,
+transcribe_queue, image, error.
 """
 
 import asyncio
@@ -32,6 +35,9 @@ class Room:
         self.sockets: dict[int, WebSocket] = {}  # user_id -> socket
         self.names: dict[int, str] = {}
         self.muted: dict[int, bool] = {}
+        # GM moderation state — persists across the target reconnecting.
+        self.force_muted: set[int] = set()
+        self.force_deafened: set[int] = set()
 
     async def broadcast(self, message: dict, exclude: int | None = None) -> None:
         data = json.dumps(message)
@@ -43,9 +49,21 @@ class Room:
             except Exception:
                 self.sockets.pop(user_id, None)
 
+    async def send_to(self, user_id: int, message: dict) -> None:
+        socket = self.sockets.get(user_id)
+        if socket is None:
+            return
+        try:
+            await socket.send_text(json.dumps(message))
+        except Exception:
+            self.sockets.pop(user_id, None)
+
     def presence(self) -> list[dict]:
         return [
-            {"user_id": uid, "name": self.names.get(uid, "?"), "muted": self.muted.get(uid, False)}
+            {"user_id": uid, "name": self.names.get(uid, "?"),
+             "muted": self.muted.get(uid, False),
+             "gm_muted": uid in self.force_muted,
+             "gm_deafened": uid in self.force_deafened}
             for uid in self.sockets
         ]
 
@@ -104,19 +122,28 @@ HISTORY_EVENTS = 300
 HISTORY_SEGMENTS = 500
 
 
-def _history(db: Session, game_id: int) -> dict:
+def _history(db: Session, game_id: int, viewer_id: int) -> dict:
     """Recent room activity, replayed to (re)connecting participants so a
-    reload or late join doesn't land in a blank room."""
+    reload or late join doesn't land in a blank room. Whispers are only
+    replayed to their sender and recipient."""
     events = (
         db.query(models.SessionEvent)
         .filter(
             models.SessionEvent.session_id == game_id,
-            models.SessionEvent.kind.in_(("chat", "roll", "marker", "system")),
+            models.SessionEvent.kind.in_(
+                ("chat", "whisper", "roll", "marker", "system", "image")
+            ),
         )
         .order_by(models.SessionEvent.id.desc())
         .limit(HISTORY_EVENTS)
         .all()
     )
+    events = [
+        e for e in events
+        if e.kind != "whisper"
+        or e.user_id == viewer_id
+        or json.loads(e.payload).get("to_user_id") == viewer_id
+    ]
     segments = (
         db.query(models.TranscriptSegment)
         .filter_by(session_id=game_id)
@@ -159,8 +186,10 @@ async def handle_room_socket(socket: WebSocket, game_id: int, user: models.User,
             "recording_started_at": (
                 game.recording_started_at.isoformat() if game.recording_started_at else None
             ),
+            "gm_muted": user.id in room.force_muted,
+            "gm_deafened": user.id in room.force_deafened,
         }))
-        await socket.send_text(json.dumps(_history(db, game_id)))
+        await socket.send_text(json.dumps(_history(db, game_id, user.id)))
         # Presence events drive the attendance list — lurkers count too,
         # not just people who typed something.
         _store_event(db, game, user.id, "presence", {"action": "join"})
@@ -214,6 +243,32 @@ async def _dispatch(socket: WebSocket, room: Room, user: models.User, is_gm: boo
         await room.broadcast({"type": "presence", "action": "state", "peers": room.presence()})
         return
 
+    if mtype == "moderate":
+        if not is_gm:
+            await socket.send_text(json.dumps(
+                {"type": "error", "message": "Only the GM can moderate players"}))
+            return
+        target = msg.get("target")
+        action = msg.get("action")
+        if target not in room.sockets or target == user.id:
+            return
+        if action == "mute":
+            room.force_muted.add(target)
+        elif action == "unmute":
+            room.force_muted.discard(target)
+        elif action == "deafen":
+            room.force_deafened.add(target)
+        elif action == "undeafen":
+            room.force_deafened.discard(target)
+        else:
+            return
+        await room.broadcast({
+            "type": "moderate", "target": target, "action": action,
+            "target_name": room.names.get(target, "?"), "by": user.name,
+            "peers": room.presence(),
+        })
+        return
+
     db = SessionLocal()
     try:
         game = db.get(models.GameSession, room.session_id)
@@ -227,6 +282,23 @@ async def _dispatch(socket: WebSocket, room: Room, user: models.User, is_gm: boo
             meta = _store_event(db, game, user.id, "chat", {"text": text})
             await room.broadcast({"type": "chat", "user_id": user.id, "name": user.name,
                                   "text": text, **meta})
+
+        elif mtype == "whisper":
+            to = msg.get("to")
+            text = str(msg.get("text", "")).strip()[:2000]
+            if not text or to not in room.sockets or to == user.id:
+                await socket.send_text(json.dumps(
+                    {"type": "error", "message": "Whisper target not in the room"}))
+                return
+            to_name = room.names.get(to, "?")
+            # Stored (kind=whisper) so it replays for the two participants,
+            # but never indexed for search and never exported.
+            meta = _store_event(db, game, user.id, "whisper",
+                                {"text": text, "to_user_id": to, "to_name": to_name})
+            message = {"type": "whisper", "user_id": user.id, "name": user.name,
+                       "to_user_id": to, "to_name": to_name, "text": text, **meta}
+            await room.send_to(to, message)
+            await room.send_to(user.id, message)
 
         elif mtype == "roll":
             try:
