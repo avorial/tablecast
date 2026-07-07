@@ -113,6 +113,17 @@ ul.plain li { padding: 4px 0; }
 @keyframes pulse { 50% { opacity: 0.5; } }
 .roll-line { color: var(--accent); }
 .marker-line { color: var(--accent-2); }
+.whisper-line { color: #b48ead; font-style: italic; }
+.chat-image {
+  display: block; max-width: 100%; max-height: 220px;
+  border-radius: 8px; border: 1px solid var(--border); margin-top: 4px;
+}
+#chat.droppable { outline: 2px dashed var(--accent); outline-offset: -4px; }
+#btn-attach { padding: 8px 10px; }
+.mod-btn {
+  padding: 1px 5px; font-size: 0.75rem; line-height: 1.4;
+  border-radius: 4px; flex: 0 0 auto;
+}
 .search-bar { display: flex; gap: 8px; margin: 14px 0 20px; max-width: 560px; }
 .search-bar input { margin-top: 0; }
 .timeline-entry { padding: 8px 0; border-bottom: 1px solid var(--border); }

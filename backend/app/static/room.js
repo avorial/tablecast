@@ -23,6 +23,25 @@
   const peers = new Map(); // user_id -> RTCPeerConnection
   let muted = false;
   let deafened = false;
+  let gmMuted = false;    // GM force-muted me
+  let gmDeafened = false; // GM force-deafened me
+
+  function applyMicState() {
+    if (micStream) {
+      micStream.getAudioTracks().forEach((t) => (t.enabled = !muted && !gmMuted));
+    }
+    const btn = $("btn-mute");
+    btn.disabled = gmMuted;
+    btn.textContent = gmMuted ? "Muted by GM" : muted ? "Unmute" : "Mute";
+  }
+
+  function applyDeafenState() {
+    const off = deafened || gmDeafened;
+    document.querySelectorAll("#audio-sinks audio").forEach((a) => (a.muted = off));
+    const btn = $("btn-deafen");
+    btn.disabled = gmDeafened;
+    btn.textContent = gmDeafened ? "Deafened by GM" : deafened ? "Undeafen" : "Deafen";
+  }
 
   // ---- recording state ----
   let recording = false;      // this client is capturing its own mic
@@ -188,7 +207,7 @@
         $("audio-sinks").appendChild(audio);
       }
       audio.srcObject = e.streams[0];
-      audio.muted = deafened;
+      audio.muted = deafened || gmDeafened;
     };
     pc.onconnectionstatechange = () => {
       if (["failed", "closed", "disconnected"].includes(pc.connectionState)) {
@@ -322,7 +341,9 @@
   }
 
   // ---------------- UI rendering ----------------
-  function participantRow(userId, label) {
+  let roomPeers = []; // last presence snapshot (for whisper name lookup)
+
+  function participantRow(userId, label, info) {
     const li = el("li", "participant");
     li.appendChild(el("span", "p-name", label));
     const meter = el("div", "meter");
@@ -330,18 +351,44 @@
     fill.id = "meter-" + userId;
     meter.appendChild(fill);
     li.appendChild(meter);
+    // GM moderation buttons on every row except the GM's own
+    if (IS_GM && userId !== MY_ID && info) {
+      const muteBtn = el("button", "mod-btn", info.gm_muted ? "🔊" : "🔇");
+      muteBtn.title = info.gm_muted ? "Unmute this player" : "Mute this player";
+      muteBtn.addEventListener("click", () =>
+        send({ type: "moderate", target: userId,
+               action: info.gm_muted ? "unmute" : "mute" }));
+      const deafBtn = el("button", "mod-btn", info.gm_deafened ? "🔔" : "🔕");
+      deafBtn.title = info.gm_deafened ? "Undeafen this player" : "Deafen this player";
+      deafBtn.addEventListener("click", () =>
+        send({ type: "moderate", target: userId,
+               action: info.gm_deafened ? "undeafen" : "deafen" }));
+      li.appendChild(muteBtn);
+      li.appendChild(deafBtn);
+    }
     return li;
   }
 
+  function stateBadge(info) {
+    let badge = "";
+    if (info.gm_muted) badge += " 🔇GM";
+    else if (info.muted) badge += " 🔇";
+    if (info.gm_deafened) badge += " 🔕GM";
+    return badge;
+  }
+
   function renderParticipants(peersInfo) {
+    roomPeers = peersInfo;
     participantsList.innerHTML = "";
+    const meInfo = peersInfo.find((p) => p.user_id === MY_ID)
+      || { muted, gm_muted: gmMuted, gm_deafened: gmDeafened };
     participantsList.appendChild(
-      participantRow(MY_ID, root.dataset.userName + " (you)" + (muted ? " 🔇" : ""))
+      participantRow(MY_ID, root.dataset.userName + " (you)" + stateBadge(meInfo), null)
     );
     for (const p of peersInfo) {
       if (p.user_id === MY_ID) continue;
       participantsList.appendChild(
-        participantRow(p.user_id, p.name + (p.muted ? " 🔇" : ""))
+        participantRow(p.user_id, p.name + stateBadge(p), p)
       );
     }
     $("voice-status").textContent = `${peersInfo.length} in room`;
@@ -375,13 +422,43 @@
     appendChat(el("p", "marker-line", `🎬 ${hms(msg.at_seconds)}${msg.label}`));
   }
 
+  function renderWhisperLine(msg) {
+    const p = el("p", "whisper-line");
+    const label = msg.user_id === MY_ID
+      ? `🤫 to ${msg.to_name}: `
+      : `🤫 ${msg.name} whispers: `;
+    p.appendChild(el("strong", null, label));
+    p.appendChild(document.createTextNode(msg.text));
+    appendChat(p);
+  }
+
+  function renderImageLine(msg) {
+    const p = el("p", "image-line");
+    p.appendChild(el("strong", null, msg.name + ": "));
+    const link = document.createElement("a");
+    link.href = msg.url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    const img = document.createElement("img");
+    img.src = msg.url;
+    img.alt = msg.filename || "shared image";
+    img.className = "chat-image";
+    img.loading = "lazy";
+    img.addEventListener("load", () => { chatBox.scrollTop = chatBox.scrollHeight; });
+    link.appendChild(img);
+    p.appendChild(link);
+    appendChat(p);
+  }
+
   function renderHistory(msg) {
     // Replayed on every (re)connect — wipe the panes so nothing duplicates.
     chatBox.innerHTML = "";
     transcriptBox.innerHTML = "";
     for (const e of msg.events) {
-      const entry = { name: e.name, at_seconds: e.at_seconds, ...e.payload };
+      const entry = { name: e.name, user_id: e.user_id, at_seconds: e.at_seconds, ...e.payload };
       if (e.kind === "chat") renderChatLine(entry);
+      else if (e.kind === "whisper") renderWhisperLine(entry);
+      else if (e.kind === "image") renderImageLine(entry);
       else if (e.kind === "roll") renderRollLine(entry);
       else if (e.kind === "marker") renderMarkerLine(entry);
       else if (e.kind === "system") appendChat(el("p", "muted small", `— ${e.payload.text} —`));
@@ -414,7 +491,12 @@
       const msg = JSON.parse(event.data);
       switch (msg.type) {
         case "peers":
-          renderParticipants([{ user_id: MY_ID, name: root.dataset.userName, muted }, ...msg.peers]);
+          gmMuted = !!msg.gm_muted;
+          gmDeafened = !!msg.gm_deafened;
+          applyMicState();
+          applyDeafenState();
+          renderParticipants([{ user_id: MY_ID, name: root.dataset.userName, muted,
+                                gm_muted: gmMuted, gm_deafened: gmDeafened }, ...msg.peers]);
           for (const p of msg.peers) newPeer(p.user_id, true); // newcomer initiates
           if (msg.recording_active) {
             roomRecording = true;
@@ -438,6 +520,31 @@
         case "chat":
           renderChatLine(msg);
           break;
+        case "whisper":
+          renderWhisperLine(msg);
+          break;
+        case "image":
+          renderImageLine(msg);
+          break;
+        case "moderate": {
+          if (msg.target === MY_ID) {
+            if (msg.action === "mute") gmMuted = true;
+            if (msg.action === "unmute") gmMuted = false;
+            if (msg.action === "deafen") gmDeafened = true;
+            if (msg.action === "undeafen") gmDeafened = false;
+            applyMicState();
+            applyDeafenState();
+            const verb = { mute: "muted", unmute: "unmuted",
+                           deafen: "deafened", undeafen: "undeafened" }[msg.action];
+            appendChat(el("p", "muted small", `You were ${verb} by ${msg.by}`));
+          } else {
+            const verb = { mute: "muted", unmute: "unmuted",
+                           deafen: "deafened", undeafen: "undeafened" }[msg.action];
+            appendChat(el("p", "muted small", `${msg.target_name} was ${verb} by ${msg.by}`));
+          }
+          renderParticipants(msg.peers);
+          break;
+        }
         case "roll":
           renderRollLine(msg);
           break;
@@ -491,6 +598,23 @@
   }
 
   // ---------------- controls ----------------
+  function sendWhisper(rest) {
+    // /w Name message — participant names can contain spaces, so match the
+    // longest name that prefixes the rest of the line.
+    const candidates = roomPeers
+      .filter((p) => p.user_id !== MY_ID)
+      .filter((p) => rest.toLowerCase().startsWith(p.name.toLowerCase() + " "))
+      .sort((a, b) => b.name.length - a.name.length);
+    if (!candidates.length) {
+      appendChat(el("p", "error small",
+        'Whisper: no matching player. Use "/w Full Name message".'));
+      return;
+    }
+    const target = candidates[0];
+    const text = rest.slice(target.name.length + 1).trim();
+    if (text) send({ type: "whisper", to: target.user_id, text });
+  }
+
   $("chat-form").addEventListener("submit", (e) => {
     e.preventDefault();
     const input = $("chat-input");
@@ -498,8 +622,53 @@
     if (!text) return;
     if (text.startsWith("/roll ")) send({ type: "roll", expression: text.slice(6) });
     else if (text === "adv" || text === "dis") send({ type: "roll", expression: text });
+    else if (text.startsWith("/w ")) sendWhisper(text.slice(3).trim());
     else send({ type: "chat", text });
     input.value = "";
+  });
+
+  // ---------------- image sharing ----------------
+  async function uploadImage(file) {
+    if (!file || !file.type.startsWith("image/")) return;
+    const form = new FormData();
+    form.append("file", file, file.name || "image");
+    try {
+      const res = await fetch(`/sessions/${SESSION_ID}/images`, { method: "POST", body: form });
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`;
+        appendChat(el("p", "error small", `Image upload failed: ${detail}`));
+      }
+    } catch (err) {
+      appendChat(el("p", "error small", "Image upload failed — connection error"));
+    }
+  }
+
+  $("btn-attach").addEventListener("click", () => $("image-input").click());
+  $("image-input").addEventListener("change", (e) => {
+    for (const file of e.target.files) uploadImage(file);
+    e.target.value = "";
+  });
+
+  // drag & drop onto the chat pane
+  chatBox.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    chatBox.classList.add("droppable");
+  });
+  chatBox.addEventListener("dragleave", () => chatBox.classList.remove("droppable"));
+  chatBox.addEventListener("drop", (e) => {
+    e.preventDefault();
+    chatBox.classList.remove("droppable");
+    for (const file of e.dataTransfer.files) uploadImage(file);
+  });
+
+  // paste an image into the chat input
+  $("chat-input").addEventListener("paste", (e) => {
+    for (const item of e.clipboardData.items) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        uploadImage(item.getAsFile());
+      }
+    }
   });
 
   document.querySelectorAll(".die").forEach((btn) =>
@@ -511,16 +680,16 @@
   );
 
   $("btn-mute").addEventListener("click", () => {
+    if (gmMuted) return;
     muted = !muted;
-    if (micStream) micStream.getAudioTracks().forEach((t) => (t.enabled = !muted));
-    $("btn-mute").textContent = muted ? "Unmute" : "Mute";
+    applyMicState();
     send({ type: "state", muted });
   });
 
   $("btn-deafen").addEventListener("click", () => {
+    if (gmDeafened) return;
     deafened = !deafened;
-    document.querySelectorAll("#audio-sinks audio").forEach((a) => (a.muted = deafened));
-    $("btn-deafen").textContent = deafened ? "Undeafen" : "Deafen";
+    applyDeafenState();
   });
 
   if (IS_GM) {

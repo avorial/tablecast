@@ -250,13 +250,81 @@ async def main():
             msg = json.loads(await gm_ws.recv())
             step("rtc relay", msg["type"] == "rtc" and msg["data"]["sdp"]["fake"] is True)
 
-    # reconnecting mid-session replays history (chat sent earlier is there)
+            # whisper: private to sender + target
+            pl_id = pl_hello["you"]
+            await gm_ws.send(json.dumps({"type": "whisper", "to": pl_id, "text": "secret plan"}))
+            msg = json.loads(await pl_ws.recv())
+            step("whisper reaches target",
+                 msg["type"] == "whisper" and msg["text"] == "secret plan")
+            msg = json.loads(await gm_ws.recv())
+            step("whisper echoes to sender", msg["type"] == "whisper")
+
+            # whisper to someone not in the room -> error
+            await gm_ws.send(json.dumps({"type": "whisper", "to": 99999, "text": "x"}))
+            msg = json.loads(await gm_ws.recv())
+            step("whisper to absent target errors", msg["type"] == "error")
+
+            # moderation: player forbidden, GM can mute/deafen the player
+            await pl_ws.send(json.dumps({"type": "moderate", "target": hello["you"], "action": "mute"}))
+            msg = json.loads(await pl_ws.recv())
+            step("player can't moderate", msg["type"] == "error")
+            await gm_ws.send(json.dumps({"type": "moderate", "target": pl_id, "action": "mute"}))
+            msg = json.loads(await pl_ws.recv())
+            step("gm mutes player",
+                 msg["type"] == "moderate" and msg["action"] == "mute" and msg["target"] == pl_id)
+            in_peers = [p for p in msg["peers"] if p["user_id"] == pl_id][0]
+            step("presence shows gm-muted", in_peers["gm_muted"] is True)
+            await gm_ws.recv()  # gm's copy of the broadcast
+            await gm_ws.send(json.dumps({"type": "moderate", "target": pl_id, "action": "deafen"}))
+            msg = json.loads(await pl_ws.recv())
+            step("gm deafens player", msg["action"] == "deafen")
+            await gm_ws.recv()
+
+            # image upload broadcasts to the room
+            png = bytes.fromhex(
+                "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+                "0000000d4944415478da63fcffff3f030005fe02fea7566a400000000049454e44ae426082"
+            )
+            r = player.post(f"/sessions/{sid}/images",
+                            files={"file": ("map.png", png, "image/png")})
+            step("image upload accepted", r.status_code == 200 and r.json()["ok"])
+            image_url = r.json()["url"]
+            msg = json.loads(await gm_ws.recv())
+            step("image broadcast", msg["type"] == "image" and msg["url"] == image_url)
+            await pl_ws.recv()
+            r = player.post(f"/sessions/{sid}/images",
+                            files={"file": ("x.txt", b"nope", "text/plain")})
+            step("non-image rejected", r.status_code == 415)
+            r = gm.get(image_url)
+            step("member can fetch image", r.status_code == 200 and r.content == png)
+            r = httpx.get(BASE + image_url, follow_redirects=False)
+            step("anonymous image fetch blocked", r.status_code == 303)
+
+    # reconnecting mid-session replays history (chat sent earlier is there,
+    # and the GM's own whisper too)
     async with websockets.connect(ws_url, additional_headers={"Cookie": gm_cookie}) as re_ws:
         json.loads(await re_ws.recv())  # peers
         hist2 = json.loads(await re_ws.recv())
         step("reconnect replays chat history", any(
             e["kind"] == "chat" and e["payload"]["text"] == "Hello table!"
             for e in hist2["events"]
+        ))
+        step("whisper replayed to participant", any(
+            e["kind"] == "whisper" and e["payload"]["text"] == "secret plan"
+            for e in hist2["events"]
+        ))
+
+    # a third member must NOT see the whisper in history
+    third = httpx.Client(base_url=BASE, follow_redirects=False)
+    third.post("/register", data={"name": "Annette", "email": "annette@example.com",
+                                  "password": "password123"})
+    third.post("/campaigns/join", data={"join_code": code})
+    third_cookie = f"tablecast_session={third.cookies['tablecast_session']}"
+    async with websockets.connect(ws_url, additional_headers={"Cookie": third_cookie}) as t_ws:
+        json.loads(await t_ws.recv())  # peers
+        hist3 = json.loads(await t_ws.recv())
+        step("whisper hidden from third party", not any(
+            e["kind"] == "whisper" for e in hist3["events"]
         ))
 
     # upload a fake audio chunk (real webm not needed for storage test)
@@ -296,6 +364,11 @@ async def main():
     # archive renders with transcript + events
     r = gm.get(session_url)
     step("archive renders", r.status_code == 200 and "customs office" in r.text and "Combat starts" in r.text)
+    step("archive shows whisper to participant", "secret plan" in r.text)
+    step("archive shows shared image", "map.png" in r.text or "/images/" in r.text)
+    r = third.get(session_url)
+    step("archive hides whisper from third party",
+         r.status_code == 200 and "secret plan" not in r.text)
 
     # markdown export
     r = gm.get(f"/sessions/{sid}/export.md")
