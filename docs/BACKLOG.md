@@ -34,9 +34,11 @@ Working list, ordered within each bucket. The phase map lives in
 - [x] Campaign timeline view (sessions × markers)
 - [x] "Campaign memory" cross-references on archive pages ("Fort Robespierre
       also came up in Sessions 3 and 5")
-- [ ] AI recap/summary/open-threads generation — pluggable backend (local
-      model or OpenAI-compatible API), filling the placeholder sections in
-      the Markdown export; also upgrades entity extraction
+- [x] AI recap/summary/open-threads generation — any OpenAI-compatible
+      endpoint (Ollama, LM Studio, OpenAI…); fills the Recap/NPCs/Locations/
+      Open Threads sections in the archive and Markdown export. Auto-runs
+      when an ended session's transcription queue drains; GM can regenerate
+      from the archive page
 - [x] Obsidian-vault-shaped export (zip of linked session + entity pages)
 - [ ] LiveKit option (SFU + TURN) behind a compose profile
 - [ ] Postgres option in compose

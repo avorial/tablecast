@@ -64,6 +64,16 @@ def session_markdown(db: Session, game: models.GameSession) -> str:
         | {s.user.name for s in segments}
     )
 
+    summary = None
+    summary_row = (
+        db.query(models.SessionSummary).filter_by(session_id=game.id).first()
+    )
+    if summary_row:
+        try:
+            summary = json.loads(summary_row.payload)
+        except json.JSONDecodeError:
+            summary = None
+
     date = (game.started_at or game.scheduled_at)
     lines = [
         f"# {game.title}",
@@ -74,8 +84,15 @@ def session_markdown(db: Session, game: models.GameSession) -> str:
         "",
         "## Recap",
         "",
-        "_(Phase 2: AI-generated recap will land here.)_",
-        "",
+    ]
+    if summary and summary.get("recap"):
+        lines += [summary["recap"], ""]
+        if summary.get("bullets"):
+            lines += [f"- {b}" for b in summary["bullets"]] + [""]
+    else:
+        lines += ["_(No AI recap yet — configure TABLECAST_LLM_BASE_URL or "
+                  "use the Generate recap button.)_", ""]
+    lines += [
         "## Important Events",
         "",
     ]
@@ -93,9 +110,15 @@ def session_markdown(db: Session, game: models.GameSession) -> str:
     else:
         lines.append("_No scene markers recorded._")
 
-    lines += ["", "## NPCs Introduced", "", "_(Phase 2)_", "",
-              "## Locations Visited", "", "_(Phase 2)_", "",
-              "## Open Threads", "", "_(Phase 2)_", ""]
+    def _list_section(title: str, key: str) -> list[str]:
+        items = (summary or {}).get(key) or []
+        body = [f"- {i}" for i in items] if items else ["_None recorded._"]
+        return ["", f"## {title}", ""] + body
+
+    lines += _list_section("NPCs Introduced", "npcs")
+    lines += _list_section("Locations Visited", "locations")
+    lines += _list_section("Open Threads", "open_threads")
+    lines += [""]
 
     rolls = [e for e in events if e.kind == "roll"]
     if rolls:

@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from .. import config, models, ws
 from ..db import SessionLocal
 from ..deps import DbDep
-from ..services import entities, search
+from ..services import entities, recap, search
 
 router = APIRouter(prefix="/internal")
 
@@ -156,9 +156,12 @@ def _refresh_entities_bg(session_id: int) -> None:
         game = db.get(models.GameSession, session_id)
         if game is not None:
             entities.refresh_session_entities(db, game)
+            # With the full transcript in, auto-generate the recap once.
+            if config.LLM_ENABLED and recap.get_summary(db, session_id) is None:
+                recap.generate(db, game)
     except Exception:
         logging.getLogger("tablecast.entities").exception(
-            "entity refresh failed for session %s", session_id)
+            "post-transcription processing failed for session %s", session_id)
     finally:
         db.close()
 

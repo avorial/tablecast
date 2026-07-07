@@ -168,6 +168,21 @@ class EntityMention(Base):
     session: Mapped[GameSession] = relationship()
 
 
+class SessionSummary(Base):
+    """AI-generated recap for a finished session (one per session,
+    regenerating replaces it)."""
+
+    __tablename__ = "session_summaries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("game_sessions.id"), unique=True, index=True
+    )
+    model: Mapped[str] = mapped_column(String(120))
+    payload: Mapped[str] = mapped_column(Text)  # JSON: recap/bullets/npcs/locations/open_threads
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Recording(Base):
     """Finalized audio artifacts produced at session end."""
 
