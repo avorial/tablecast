@@ -71,3 +71,11 @@ except ValueError:
         "TABLECAST_ICE_SERVERS is not valid JSON; using default STUN only"
     )
     ICE_SERVERS = _DEFAULT_ICE
+
+# AI recap generation, via any OpenAI-compatible chat-completions endpoint:
+# Ollama (http://host:11434/v1), LM Studio, OpenRouter, OpenAI, etc.
+# Disabled unless both a base URL and a model are set.
+LLM_BASE_URL = os.environ.get("TABLECAST_LLM_BASE_URL", "").rstrip("/")
+LLM_API_KEY = os.environ.get("TABLECAST_LLM_API_KEY", "")
+LLM_MODEL = os.environ.get("TABLECAST_LLM_MODEL", "")
+LLM_ENABLED = bool(LLM_BASE_URL and LLM_MODEL)

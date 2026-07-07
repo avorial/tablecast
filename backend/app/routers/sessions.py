@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from .. import config, models, security, ws
 from ..db import SessionLocal
 from ..deps import DbDep, UserDep, require_session_member, templates
-from ..services import audio, entities, export
+from ..services import audio, entities, export, recap
 
 router = APIRouter()
 
@@ -86,8 +86,24 @@ def _archive_page(request, db, user, game, member):
          "is_gm": member.role == "gm", "events": parsed_events,
          "segments": merged, "speakers": speakers,
          "recordings": recordings, "attendees": attendees,
-         "connections": connections},
+         "connections": connections,
+         "summary": recap.get_summary(db, game.id),
+         "llm_enabled": config.LLM_ENABLED},
     )
+
+
+@router.post("/sessions/{session_id}/recap")
+def generate_recap(db: DbDep, user: UserDep, session_id: int):
+    game, member = require_session_member(db, session_id, user)
+    if member.role != "gm":
+        raise HTTPException(403, "Only the GM can generate recaps")
+    if game.status != "ended":
+        raise HTTPException(409, "Recaps are generated after the session ends")
+    try:
+        recap.generate(db, game)
+    except recap.RecapError as exc:
+        raise HTTPException(502, str(exc))
+    return RedirectResponse(f"/sessions/{session_id}", status_code=303)
 
 
 @router.post("/sessions/{session_id}/start")

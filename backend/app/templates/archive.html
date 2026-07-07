@@ -10,6 +10,49 @@
 
 <div class="two-col">
   <div>
+    {% if summary and summary.recap %}
+    <div class="card">
+      <h2>Recap</h2>
+      {% for para in summary.recap.split("\n\n") %}<p>{{ para }}</p>{% endfor %}
+      {% if summary.bullets %}
+      <ul>
+        {% for b in summary.bullets %}<li>{{ b }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      <div class="recap-lists">
+        {% if summary.npcs %}<p><strong>NPCs:</strong> {{ summary.npcs | join(", ") }}</p>{% endif %}
+        {% if summary.locations %}<p><strong>Locations:</strong> {{ summary.locations | join(", ") }}</p>{% endif %}
+        {% if summary.open_threads %}
+        <p><strong>Open threads:</strong></p>
+        <ul class="plain">
+          {% for t in summary.open_threads %}<li>🧵 {{ t }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      {% if is_gm and llm_enabled %}
+      <form method="post" action="/sessions/{{ game.id }}/recap" class="stack-top">
+        <button>Regenerate recap</button>
+      </form>
+      {% endif %}
+    </div>
+    {% elif is_gm %}
+    <div class="card">
+      <h2>Recap</h2>
+      {% if llm_enabled %}
+      <form method="post" action="/sessions/{{ game.id }}/recap">
+        <button class="primary">Generate recap</button>
+      </form>
+      <p class="muted small">Summarizes the session with the configured model
+        — recap, highlights, NPCs, locations, and open threads. May take a
+        minute on local models.</p>
+      {% else %}
+      <p class="muted small">Set <code>TABLECAST_LLM_BASE_URL</code> and
+        <code>TABLECAST_LLM_MODEL</code> (any OpenAI-compatible endpoint —
+        Ollama, LM Studio, OpenAI…) to enable AI recaps.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
     <div class="card">
       <h2>Transcript</h2>
       {% if segments %}

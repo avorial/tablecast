@@ -19,9 +19,43 @@ import httpx
 import websockets
 
 PORT = int(os.environ.get("SMOKE_PORT", "8399"))
+LLM_PORT = PORT + 1
 BASE = f"http://127.0.0.1:{PORT}"
 WORKER_TOKEN = "smoke-worker-token"
 FAILED = False
+
+RECAP_JSON = json.dumps({
+    "recap": "The party investigated the customs office in Port Sainte Jeanne.",
+    "bullets": ["Combat began at the docks"],
+    "npcs": ["Judith Dumont"],
+    "locations": ["Fort Robespierre"],
+    "open_threads": ["Why does the cargo bear the Dumont seal?"],
+})
+
+
+def start_stub_llm():
+    """Minimal OpenAI-compatible /chat/completions endpoint."""
+    import http.server
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            body = json.dumps(
+                {"choices": [{"message": {"content": RECAP_JSON}}]}
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", LLM_PORT), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
 
 
 def step(name, ok, detail=""):
@@ -39,6 +73,8 @@ def start_server(data_dir: str) -> subprocess.Popen:
         TABLECAST_SHARED_DIR=data_dir,
         TABLECAST_SECRET_KEY="smoke-secret",
         TABLECAST_WORKER_TOKEN=WORKER_TOKEN,
+        TABLECAST_LLM_BASE_URL=f"http://127.0.0.1:{LLM_PORT}",
+        TABLECAST_LLM_MODEL="stub-model",
     )
     backend_dir = Path(__file__).resolve().parents[1]
     proc = subprocess.Popen(
@@ -289,10 +325,27 @@ async def main():
          and "Port Sainte Jeanne.md" in names,
          str(names))
 
+    # --- AI recap (against the stub LLM) ---
+    r = player.post(f"/sessions/{sid}/recap")
+    step("player can't generate recap", r.status_code == 403)
+    r = gm.post(f"/sessions/{sid}/recap")
+    step("gm generates recap", r.status_code == 303)
+    r = gm.get(session_url)
+    step("archive shows recap",
+         "investigated the customs office" in r.text
+         and "Why does the cargo bear the Dumont seal?" in r.text)
+    r = gm.get(f"/sessions/{sid}/export.md")
+    step("export includes recap sections",
+         "investigated the customs office" in r.text
+         and "- Judith Dumont" in r.text
+         and "- Fort Robespierre" in r.text
+         and "- Why does the cargo bear the Dumont seal?" in r.text)
+
     print("\nALL SMOKE TESTS PASSED")
 
 
 if __name__ == "__main__":
+    stub_llm = start_stub_llm()
     with tempfile.TemporaryDirectory() as tmp:
         server = start_server(tmp)
         try:
@@ -305,4 +358,5 @@ if __name__ == "__main__":
                 server.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 server.kill()
+            stub_llm.shutdown()
     sys.exit(1 if FAILED else 0)

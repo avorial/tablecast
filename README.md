@@ -91,6 +91,11 @@ All optional, via environment variables (see `.env.example`):
 | `TABLECAST_REGISTRATION_OPEN` | `true` | Set `false` to close signups |
 | `WHISPER_MODEL` | `base` | `tiny`/`base`/`small`/`medium`/`large-v3` |
 | `WHISPER_DEVICE` | `cpu` | `cuda` if you have a GPU |
+| `WHISPER_LANGUAGE` | auto-detect | Pin the spoken language, e.g. `en` |
+| `TABLECAST_LLM_BASE_URL` | unset (recaps off) | OpenAI-compatible endpoint for AI recaps |
+| `TABLECAST_LLM_MODEL` | — | Model name at that endpoint |
+| `TABLECAST_LLM_API_KEY` | — | If the endpoint needs one |
+| `TABLECAST_ICE_SERVERS` | Google STUN | JSON array; add TURN for strict NATs |
 | `DATABASE_URL` | SQLite on `/data` | Any SQLAlchemy URL (Postgres later) |
 
 Pin `TABLECAST_SECRET_KEY` / `TABLECAST_WORKER_TOKEN` yourself if you want
