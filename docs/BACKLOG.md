@@ -45,11 +45,17 @@ Working list, ordered within each bucket. The phase map lives in
 
 ## Phase 3 — Podcast tools
 
-- [ ] Sample-accurate speaker alignment in the mixdown (use chunk `offset_s`
-      with `adelay`, verify drift over 4-hour sessions)
-- [ ] Loudness normalization (EBU R128 via `loudnorm`) + silence trimming
-- [ ] Intro/outro slots, chapter markers from scene markers (ID3/MP4 chapters)
-- [ ] Per-speaker WAV export for DAW editing
+- [x] Sample-accurate speaker alignment: chunks group into contiguous runs,
+      each placed at its true `offset_s` via `adelay` (gaps/mutes/late joins
+      become silence); every speaker track starts at recording t=0
+- [x] Loudness normalization (EBU R128 `loudnorm`, -16 LUFS / -1.5 dBTP)
+      on the episode master
+- [ ] Silence trimming — deferred on purpose: cutting time out of the
+      episode desyncs chapters and the transcript; needs a timestamp remap
+- [x] Intro/outro slots (`/data/podcast/intro.mp3` / `outro.mp3`), chapter
+      markers from scene markers embedded in `episode.m4a` (+ `chapters.txt`)
+- [x] Per-speaker WAV export for DAW editing
+- [x] Show notes (`show-notes.md`) from the AI recap + chapter list
 - [ ] Prior art: [Craig](https://github.com/CraigChat/craig) (Discord
       multi-track recorder) — study its "cook" post-processing pipeline
       (per-track normalization, format conversion, smart mixdown)

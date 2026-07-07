@@ -137,12 +137,40 @@
         <p class="muted">Audio is still processing — refresh in a minute.</p>
       {% endif %}
       <ul class="plain">
-        {% for r in recordings %}
+        {% for r in recordings if r.kind in ("speaker", "mixed") %}
         <li>🔊 <a href="/sessions/{{ game.id }}/recordings/{{ r.id }}">{{ r.filename }}</a>
             <span class="badge">{{ r.kind }}</span></li>
         {% endfor %}
         <li>📄 <a href="/sessions/{{ game.id }}/export.md">Markdown summary</a></li>
       </ul>
+    </div>
+
+    <div class="card">
+      <h2>Podcast</h2>
+      {% if game.podcast_status == "building" %}
+        <p class="muted">🎛️ Building the episode — refresh in a minute.</p>
+      {% elif game.podcast_status == "failed" %}
+        <p class="error small">Podcast build failed — check the backend logs.</p>
+      {% endif %}
+      {% set bundle = recordings | selectattr("kind", "in", ["podcast", "chapters", "shownotes", "speaker_wav"]) | list %}
+      {% if bundle %}
+      <ul class="plain">
+        {% for r in bundle %}
+        <li>{{ "🎙️" if r.kind == "podcast" else "📝" if r.kind in ("chapters", "shownotes") else "🎚️" }}
+            <a href="/sessions/{{ game.id }}/recordings/{{ r.id }}">{{ r.filename }}</a>
+            <span class="badge">{{ r.kind }}</span></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if is_gm and game.recordings_ready and game.podcast_status != "building" %}
+      <form method="post" action="/sessions/{{ game.id }}/podcast" class="{{ 'stack-top' if bundle }}">
+        <button class="{{ '' if bundle else 'primary' }}">{{ "Rebuild" if bundle else "Build" }} podcast bundle</button>
+      </form>
+      <p class="muted small">Loudness-normalized episode with chapter markers
+        from your scene markers, per-speaker WAVs, and show notes. Drop
+        <code>intro.mp3</code>/<code>outro.mp3</code> in
+        <code>/data/podcast/</code> to add them to the episode.</p>
+      {% endif %}
     </div>
   </div>
 </div>

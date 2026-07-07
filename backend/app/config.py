@@ -79,3 +79,13 @@ LLM_BASE_URL = os.environ.get("TABLECAST_LLM_BASE_URL", "").rstrip("/")
 LLM_API_KEY = os.environ.get("TABLECAST_LLM_API_KEY", "")
 LLM_MODEL = os.environ.get("TABLECAST_LLM_MODEL", "")
 LLM_ENABLED = bool(LLM_BASE_URL and LLM_MODEL)
+
+# Seconds to wait after session end before finalizing audio, giving clients
+# time to flush their last recording chunk. Tests set this to 0.
+FINALIZE_DELAY_S = float(os.environ.get("TABLECAST_FINALIZE_DELAY_S", "10"))
+
+# Podcast intro/outro slots: any ffmpeg-readable audio placed at these paths
+# is stitched onto the episode (chapters shift automatically).
+PODCAST_DIR = DATA_DIR / "podcast"
+INTRO_PATH = PODCAST_DIR / "intro.mp3"
+OUTRO_PATH = PODCAST_DIR / "outro.mp3"

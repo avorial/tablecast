@@ -81,6 +81,8 @@ class GameSession(Base):
         DateTime(timezone=True), nullable=True
     )
     recordings_ready: Mapped[bool] = mapped_column(Boolean, default=False)
+    # "" | building | ready | failed
+    podcast_status: Mapped[str] = mapped_column(String(16), default="")
 
     campaign: Mapped[Campaign] = relationship(back_populates="sessions")
     events: Mapped[list["SessionEvent"]] = relationship(

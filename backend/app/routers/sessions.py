@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from .. import config, models, security, ws
 from ..db import SessionLocal
 from ..deps import DbDep, UserDep, require_session_member, templates
-from ..services import audio, entities, export, recap
+from ..services import audio, entities, export, podcast, recap
 
 router = APIRouter()
 
@@ -90,6 +90,23 @@ def _archive_page(request, db, user, game, member):
          "summary": recap.get_summary(db, game.id),
          "llm_enabled": config.LLM_ENABLED},
     )
+
+
+@router.post("/sessions/{session_id}/podcast")
+def build_podcast(db: DbDep, user: UserDep, session_id: int):
+    game, member = require_session_member(db, session_id, user)
+    if member.role != "gm":
+        raise HTTPException(403, "Only the GM can build the podcast bundle")
+    if game.status != "ended" or not game.recordings_ready:
+        raise HTTPException(409, "Wait until the session has ended and audio is processed")
+    if game.podcast_status == "building":
+        raise HTTPException(409, "Podcast build already in progress")
+    game.podcast_status = "building"
+    db.commit()
+    threading.Thread(
+        target=podcast.build_podcast_bundle, args=(session_id,), daemon=True
+    ).start()
+    return RedirectResponse(f"/sessions/{session_id}", status_code=303)
 
 
 @router.post("/sessions/{session_id}/recap")
