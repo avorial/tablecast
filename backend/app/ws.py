@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from . import models
 from .db import SessionLocal
-from .services import dice
+from .services import dice, search
 
 log = logging.getLogger("tablecast.ws")
 
@@ -90,6 +90,12 @@ def _store_event(
         at_seconds=_recording_offset(game),
     )
     db.add(event)
+    if kind in ("chat", "marker"):
+        body = payload.get("text") or " ".join(
+            filter(None, [payload.get("label"), payload.get("note")])
+        )
+        speaker = db.get(models.User, user_id).name if user_id else None
+        search.index_text(db, game.campaign_id, game.id, kind, speaker, body)
     db.commit()
     return {"at_seconds": event.at_seconds, "created_at": event.created_at.isoformat()}
 

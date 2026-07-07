@@ -6,6 +6,8 @@ backend stores them and pushes them to the live room.
 """
 
 import hmac
+import logging
+import threading
 from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException
@@ -13,7 +15,9 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from .. import config, models, ws
+from ..db import SessionLocal
 from ..deps import DbDep
+from ..services import entities, search
 
 router = APIRouter(prefix="/internal")
 
@@ -28,17 +32,20 @@ WorkerToken = Annotated[str | None, Header(alias="X-Worker-Token")]
 
 def _initial_prompt(db, session_id: int) -> str:
     """Vocabulary hint for whisper: campaign proper nouns transcribe far
-    better when they appear in the prompt (Phase 2 will add extracted
-    NPC/location names from earlier sessions here too)."""
+    better when they appear in the prompt."""
     game = db.get(models.GameSession, session_id)
     if game is None:
         return ""
     campaign = game.campaign
     names = [m.user.name for m in campaign.members]
-    return (
+    prompt = (
         f"Tabletop RPG session of the campaign {campaign.name}, "
         f"session {game.title}. Players: {', '.join(names)}."
-    )[:400]
+    )
+    known = entities.prompt_names(db, campaign.id)
+    if known:
+        prompt += f" Known names: {', '.join(known)}."
+    return prompt[:500]
 
 
 def pending_count(db, session_id: int) -> int:
@@ -101,6 +108,7 @@ async def job_result(db: DbDep, chunk_id: int, result: JobResult, token: WorkerT
         raise HTTPException(404, "No such chunk")
 
     chunk.transcribe_status = "done" if result.status == "done" else "failed"
+    game = db.get(models.GameSession, chunk.session_id)
     new_segments = []
     for seg in result.segments:
         text = seg.text.strip()
@@ -115,7 +123,16 @@ async def job_result(db: DbDep, chunk_id: int, result: JobResult, token: WorkerT
         )
         db.add(row)
         new_segments.append(row)
+        search.index_text(db, game.campaign_id, chunk.session_id, "transcript",
+                          chunk.user.name, text)
     db.commit()
+
+    # Once an ended session's queue drains, refresh its campaign-memory
+    # entities in the background.
+    if game.status == "ended" and pending_count(db, chunk.session_id) == 0:
+        threading.Thread(
+            target=_refresh_entities_bg, args=(chunk.session_id,), daemon=True
+        ).start()
 
     if new_segments:
         user = db.get(models.User, chunk.user_id)
@@ -131,6 +148,19 @@ async def job_result(db: DbDep, chunk_id: int, result: JobResult, token: WorkerT
         "type": "transcribe_queue", "pending": pending_count(db, chunk.session_id),
     })
     return {"ok": True}
+
+
+def _refresh_entities_bg(session_id: int) -> None:
+    db = SessionLocal()
+    try:
+        game = db.get(models.GameSession, session_id)
+        if game is not None:
+            entities.refresh_session_entities(db, game)
+    except Exception:
+        logging.getLogger("tablecast.entities").exception(
+            "entity refresh failed for session %s", session_id)
+    finally:
+        db.close()
 
 
 @router.post("/jobs/requeue-stale")

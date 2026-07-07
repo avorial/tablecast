@@ -71,6 +71,23 @@
   </div>
 
   <div>
+    {% if connections %}
+    <div class="card">
+      <h2>Campaign memory</h2>
+      <ul class="plain">
+        {% for c in connections[:20] %}
+        <li><strong>{{ c.name }}</strong> <span class="muted small">{{ c.count }}×</span>
+          {% if c.others %}
+          <div class="muted small">also in
+            {% for o in c.others %}<a href="/sessions/{{ o.id }}">#{{ o.id }} {{ o.title }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+          </div>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
     <div class="card">
       <h2>Downloads</h2>
       {% if not game.recordings_ready %}

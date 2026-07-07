@@ -5,6 +5,11 @@
 <h1>{{ campaign.name }}</h1>
 <p class="muted">{{ campaign.description }}</p>
 
+<form method="get" action="/campaigns/{{ campaign.id }}/search" class="search-bar">
+  <input type="search" name="q" placeholder="Search transcripts, chat, and markers across every session…" value="">
+  <button class="primary">Search</button>
+</form>
+
 <div class="two-col">
   <div>
     <div class="card">
@@ -53,6 +58,49 @@
       <p class="muted">Invite code: <code>{{ campaign.join_code }}</code></p>
       {% endif %}
     </div>
+
+    {% if glossary %}
+    <div class="card">
+      <h2>Campaign memory</h2>
+      <p class="muted small">Names mined from transcripts and chat — these also
+        improve future transcription accuracy.</p>
+      <ul class="plain">
+        {% for e in glossary[:15] %}
+        <li>{{ e.name }} <span class="muted small">{{ e.total }}× in
+          {% for s in e.sessions %}<a href="/sessions/{{ s.id }}">#{{ s.id }}</a>{{ " " }}{% endfor %}
+        </span></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    {% if past %}
+    <div class="card">
+      <h2>Export</h2>
+      <p><a href="/campaigns/{{ campaign.id }}/export.zip">📦 Obsidian vault (.zip)</a></p>
+      <p class="muted small">Linked pages for every session and every
+        recurring name — unzip straight into your vault.</p>
+    </div>
+    {% endif %}
+
+    {% if timeline %}
+    <div class="card">
+      <h2>Timeline</h2>
+      {% for entry in timeline %}
+      <div class="timeline-entry">
+        <a href="/sessions/{{ entry.session.id }}"><strong>{{ entry.session.title }}</strong></a>
+        {% if entry.session.started_at %}<span class="muted small">{{ entry.session.started_at.strftime("%Y-%m-%d") }}</span>{% endif %}
+        {% if entry.markers %}
+        <ul class="plain small">
+          {% for m in entry.markers %}
+          <li>🎬 {{ m.label }}{% if m.note %} — {{ m.note }}{% endif %}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

@@ -1,6 +1,10 @@
-"""Markdown export for a finished session — the wiki-ready artifact."""
+"""Markdown export for a finished session — the wiki-ready artifact —
+plus the campaign-wide Obsidian vault zip."""
 
+import io
 import json
+import re
+import zipfile
 
 from sqlalchemy.orm import Session
 
@@ -124,3 +128,70 @@ def session_markdown(db: Session, game: models.GameSession) -> str:
         lines.append("")
 
     return "\n".join(lines)
+
+
+def safe_filename(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9 _-]+", "", name).strip() or "untitled"
+
+
+def _session_page_name(game: models.GameSession) -> str:
+    title = safe_filename(game.title)
+    if title.lower().startswith("session"):
+        return title
+    return f"Session {game.id} - {title}"
+
+
+def campaign_vault_zip(db: Session, campaign: models.Campaign) -> bytes:
+    """Obsidian-shaped vault: an index page, one page per session, and one
+    page per campaign entity, cross-linked with [[wikilinks]]."""
+    sessions = [s for s in campaign.sessions if s.status == "ended"]
+    sessions.sort(key=lambda s: s.id)
+
+    entity_rows = (
+        db.query(models.CampaignEntity)
+        .filter_by(campaign_id=campaign.id)
+        .all()
+    )
+    entity_rows = [e for e in entity_rows if e.mentions]
+    entity_rows.sort(key=lambda e: -sum(m.count for m in e.mentions))
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        # session pages, with a Names section linking entity pages
+        session_names = {}
+        for game in sessions:
+            page_name = _session_page_name(game)
+            session_names[game.id] = page_name
+            body = session_markdown(db, game)
+            mentioned = [
+                m.entity.name
+                for m in db.query(models.EntityMention).filter_by(session_id=game.id).all()
+            ]
+            if mentioned:
+                links = " · ".join(f"[[{safe_filename(n)}]]" for n in sorted(mentioned))
+                body += f"\n## Names Mentioned\n\n{links}\n"
+            zf.writestr(f"Sessions/{page_name}.md", body)
+
+        # entity pages
+        for entity in entity_rows:
+            lines = [f"# {entity.name}", "", f"Mentioned {sum(m.count for m in entity.mentions)}× across the campaign.", "", "## Appearances", ""]
+            for m in sorted(entity.mentions, key=lambda m: m.session_id):
+                page = session_names.get(m.session_id)
+                if page:
+                    lines.append(f"- [[{page}]] — {m.count}×")
+            lines.append("")
+            zf.writestr(f"Entities/{safe_filename(entity.name)}.md", "\n".join(lines))
+
+        # index page
+        idx = [f"# {campaign.name}", ""]
+        if campaign.description:
+            idx += [campaign.description, ""]
+        idx += ["## Sessions", ""]
+        idx += [f"- [[{session_names[s.id]}]]" for s in sessions]
+        idx += ["", "## Cast & Places", ""]
+        idx += [f"- [[{safe_filename(e.name)}]] ({sum(m.count for m in e.mentions)}×)"
+                for e in entity_rows[:50]]
+        idx.append("")
+        zf.writestr(f"{safe_filename(campaign.name)}.md", "\n".join(idx))
+
+    return buf.getvalue()

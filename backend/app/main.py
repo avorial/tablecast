@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .db import init_db
 from .routers import auth, campaigns, internal, sessions
+from .services import search
 
 logging.basicConfig(level=logging.INFO)
 
@@ -14,6 +15,8 @@ logging.basicConfig(level=logging.INFO)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
+    search.create_index()
+    search.rebuild_if_empty()
     yield
 
 

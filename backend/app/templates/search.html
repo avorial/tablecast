@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Search — {{ campaign.name }} — Tablecast{% endblock %}
+{% block content %}
+<p><a href="/campaigns/{{ campaign.id }}">← {{ campaign.name }}</a></p>
+<h1>Search</h1>
+
+<form method="get" action="/campaigns/{{ campaign.id }}/search" class="search-bar">
+  <input type="search" name="q" value="{{ q }}" autofocus
+         placeholder="Search transcripts, chat, and markers…">
+  <button class="primary">Search</button>
+</form>
+
+{% if q %}
+<p class="muted">{{ total }} result{{ "" if total == 1 else "s" }} for “{{ q }}”</p>
+
+{% for session_id, hits in grouped.items() %}
+<div class="card">
+  <h2><a href="/sessions/{{ session_id }}">{{ titles.get(session_id, "Session " ~ session_id) }}</a></h2>
+  {% for hit in hits %}
+  <p>
+    <span class="badge">{{ hit.kind }}</span>
+    {% if hit.speaker %}<strong>{{ hit.speaker }}:</strong>{% endif %}
+    {{ hit.snip | safe }}
+  </p>
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted">Nothing found. Search covers the transcript, chat, and scene
+markers of every session in this campaign.</p>
+{% endfor %}
+{% endif %}
+{% endblock %}

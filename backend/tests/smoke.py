@@ -225,7 +225,10 @@ async def main():
     r = httpx.post(
         BASE + f"/internal/jobs/{job['id']}/result",
         headers={"X-Worker-Token": WORKER_TOKEN},
-        json={"status": "done", "segments": [{"start": 0.5, "end": 3.2, "text": "We should check the customs office."}]},
+        json={"status": "done", "segments": [{
+            "start": 0.5, "end": 3.2,
+            "text": "We should check the customs office. Judith Dumont mentioned Fort Robespierre again.",
+        }]},
     )
     step("worker posts segments", r.status_code == 200)
     r = httpx.post(BASE + "/internal/jobs/claim", headers={"X-Worker-Token": WORKER_TOKEN})
@@ -259,6 +262,32 @@ async def main():
         step("ws to ended session rejected", False)
     except Exception as e:
         step("ws to ended session rejected", "403" in str(e) or "4403" in str(e), str(e))
+
+    # --- Phase 2: search, campaign memory, vault export ---
+    r = gm.get(f"/campaigns/{cid}/search", params={"q": "Robespierre"})
+    step("fts search finds transcript", r.status_code == 200 and "<mark>Robespierre</mark>" in r.text)
+    r = gm.get(f"/campaigns/{cid}/search", params={"q": "hello table"})
+    step("fts search finds chat", r.status_code == 200 and "Hello" in r.text)
+    r = gm.get(f"/campaigns/{cid}/search", params={"q": "nonexistentword12345"})
+    step("fts search empty result", r.status_code == 200 and "Nothing found" in r.text)
+
+    # archive lazily extracted entities -> campaign memory on both pages
+    r = gm.get(session_url)
+    step("archive shows campaign memory", "Judith Dumont" in r.text and "Fort Robespierre" in r.text)
+    r = gm.get(campaign_url)
+    step("campaign glossary", "Campaign memory" in r.text and "Judith Dumont" in r.text)
+
+    # entity names now feed the whisper prompt for future chunks
+    import io
+    import zipfile as zf_mod
+    r = gm.get(f"/campaigns/{cid}/export.zip")
+    step("vault export downloads", r.status_code == 200 and r.headers["content-type"] == "application/zip")
+    names = zf_mod.ZipFile(io.BytesIO(r.content)).namelist()
+    step("vault has session + entity pages",
+         any(n.startswith("Sessions/") for n in names)
+         and "Entities/Judith Dumont.md" in names
+         and "Port Sainte Jeanne.md" in names,
+         str(names))
 
     print("\nALL SMOKE TESTS PASSED")
 

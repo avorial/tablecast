@@ -26,15 +26,18 @@ Working list, ordered within each bucket. The phase map lives in
 
 ## Phase 2 — Campaign archive
 
-- [ ] Full-text search across transcripts/chat/notes (SQLite FTS5)
-- [ ] Entity extraction (NPCs, locations, factions) from transcripts into a
-      campaign glossary; feed it back into whisper `initial_prompt` (loop!)
-- [ ] Campaign timeline view (sessions × markers × reveals)
-- [ ] "Campaign memory" cross-references ("Fort Robespierre also came up in
-      Sessions 3 and 5")
+- [x] Full-text search across transcripts/chat/markers (SQLite FTS5 with
+      snippets and highlights; LIKE fallback on other databases)
+- [x] Entity extraction into a campaign glossary — heuristic proper-noun
+      mining (no ML dependency); feeds back into whisper `initial_prompt`
+      so recurring names transcribe correctly (the loop!)
+- [x] Campaign timeline view (sessions × markers)
+- [x] "Campaign memory" cross-references on archive pages ("Fort Robespierre
+      also came up in Sessions 3 and 5")
 - [ ] AI recap/summary/open-threads generation — pluggable backend (local
-      model or API), filling the placeholder sections in the Markdown export
-- [ ] Obsidian-vault-shaped export (folder of linked pages, not one file)
+      model or OpenAI-compatible API), filling the placeholder sections in
+      the Markdown export; also upgrades entity extraction
+- [x] Obsidian-vault-shaped export (zip of linked session + entity pages)
 - [ ] LiveKit option (SFU + TURN) behind a compose profile
 - [ ] Postgres option in compose
 
