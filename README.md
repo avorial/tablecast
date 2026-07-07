@@ -57,11 +57,17 @@ see [Configuration](#configuration) below.
    ❗ Important reveal, 🧙 NPC introduced, 📜 Lore drop, 🎬 End scene.
 6. If the transcription worker is running, transcript lines appear live in the
    room as people speak.
-7. The GM hits **End session**. FFmpeg concatenates each speaker's chunks into
-   `<Name>.ogg` and mixes everyone into `mixed.mp3`.
+7. The GM hits **End session**. FFmpeg builds *aligned* speaker tracks
+   (`<Name>.ogg`, all starting at recording t=0 — gaps become silence) and
+   mixes everyone into `mixed.mp3`.
 8. The session archive page now has: attendees, full event log, transcript,
    audio downloads, and a **Markdown export** ready for Obsidian / GitHub /
    your campaign wiki.
+9. Want an episode? Hit **Build podcast bundle**: a loudness-normalized
+   `episode.m4a` (-16 LUFS) with chapter markers generated from your scene
+   markers, `chapters.txt`, `show-notes.md` (from the AI recap), and
+   per-speaker WAVs for DAW editing. Drop `intro.mp3`/`outro.mp3` into
+   `/data/podcast/` and they're stitched on, chapters shifted automatically.
 
 ## Architecture
 

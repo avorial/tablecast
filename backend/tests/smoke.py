@@ -33,6 +33,23 @@ RECAP_JSON = json.dumps({
 })
 
 
+def have_ffmpeg() -> bool:
+    import shutil
+    return shutil.which("ffmpeg") is not None
+
+
+def make_opus_chunk(seconds: float, freq: int, path: str) -> bytes:
+    """A real webm/opus blob, like MediaRecorder produces."""
+    subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+         "-f", "lavfi", "-i", f"sine=frequency={freq}:duration={seconds}",
+         "-c:a", "libopus", "-b:a", "48k", path],
+        check=True,
+    )
+    with open(path, "rb") as f:
+        return f.read()
+
+
 def start_stub_llm():
     """Minimal OpenAI-compatible /chat/completions endpoint."""
     import http.server
@@ -75,6 +92,7 @@ def start_server(data_dir: str) -> subprocess.Popen:
         TABLECAST_WORKER_TOKEN=WORKER_TOKEN,
         TABLECAST_LLM_BASE_URL=f"http://127.0.0.1:{LLM_PORT}",
         TABLECAST_LLM_MODEL="stub-model",
+        TABLECAST_FINALIZE_DELAY_S="0",
     )
     backend_dir = Path(__file__).resolve().parents[1]
     proc = subprocess.Popen(
@@ -341,7 +359,78 @@ async def main():
          and "- Fort Robespierre" in r.text
          and "- Why does the cargo bear the Dumont seal?" in r.text)
 
+    # --- Phase 3: aligned audio + podcast bundle (needs real ffmpeg) ---
+    if have_ffmpeg():
+        await podcast_flow(gm, player, cid, gm_cookie)
+    else:
+        print("SKIP  podcast pipeline (no ffmpeg on this machine)")
+
     print("\nALL SMOKE TESTS PASSED")
+
+
+async def podcast_flow(gm, player, cid, gm_cookie):
+    r = gm.post(f"/campaigns/{cid}/sessions", data={"title": "Session 2 - Audio"})
+    sid = int(r.headers["location"].rsplit("/", 1)[1])
+    gm.post(f"/sessions/{sid}/start")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        c0 = make_opus_chunk(2.0, 440, f"{tmp}/c0.webm")
+        c1 = make_opus_chunk(2.0, 660, f"{tmp}/c1.webm")
+        c2 = make_opus_chunk(2.0, 880, f"{tmp}/c2.webm")
+
+    ws_url = f"ws://127.0.0.1:{PORT}/ws/sessions/{sid}"
+    async with websockets.connect(ws_url, additional_headers={"Cookie": gm_cookie}) as ws:
+        await ws.recv()  # peers
+        await ws.recv()  # history
+        await ws.send(json.dumps({"type": "record", "action": "start"}))
+        await ws.recv()  # record broadcast
+        await ws.send(json.dumps({"type": "marker", "label": "Combat starts"}))
+        await ws.recv()  # marker broadcast
+
+    # GM: two runs separated by a real gap (0-2s tone, silence, 6-8s tone);
+    # player: one run starting at 3s. Exercises run grouping + adelay.
+    gm.post(f"/sessions/{sid}/chunks", files={"file": ("c.webm", c0, "audio/webm")},
+            data={"seq": "0", "offset": "0.0"})
+    gm.post(f"/sessions/{sid}/chunks", files={"file": ("c.webm", c1, "audio/webm")},
+            data={"seq": "1", "offset": "6.0"})
+    player.post(f"/sessions/{sid}/chunks", files={"file": ("c.webm", c2, "audio/webm")},
+                data={"seq": "0", "offset": "3.0"})
+
+    gm.post(f"/sessions/{sid}/end")
+
+    def wait_for(pred, seconds=90):
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            page = gm.get(f"/sessions/{sid}").text
+            if "build failed" in page:
+                return page
+            if pred(page):
+                return page
+            time.sleep(1)
+        return gm.get(f"/sessions/{sid}").text
+
+    page = wait_for(lambda p: "mixed.mp3" in p)
+    step("aligned speaker tracks + mixdown built",
+         "mixed.mp3" in page and ".ogg" in page)
+
+    r = gm.post(f"/sessions/{sid}/podcast")
+    step("gm starts podcast build", r.status_code == 303)
+    page = wait_for(lambda p: "episode.m4a" in p)
+    step("podcast bundle built",
+         "episode.m4a" in page and "chapters.txt" in page
+         and "show-notes.md" in page and ".wav" in page, "see archive page")
+
+    # chapters.txt content: session start + the marker
+    m = re.search(r'href="(/sessions/%d/recordings/\d+)">chapters\.txt' % sid, page)
+    step("chapters link present", m is not None)
+    r = gm.get(m.group(1))
+    step("chapters content",
+         "00:00:00 Session start" in r.text and "Combat starts" in r.text, r.text.strip())
+
+    # the mixed episode is a real, non-trivial file
+    m = re.search(r'href="(/sessions/%d/recordings/\d+)">episode\.m4a' % sid, page)
+    r = gm.get(m.group(1))
+    step("episode.m4a non-trivial", len(r.content) > 20_000, f"{len(r.content)} bytes")
 
 
 if __name__ == "__main__":
