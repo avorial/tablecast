@@ -5,35 +5,39 @@ Working list, ordered within each bucket. The phase map lives in
 
 ## Phase 1 hardening (before calling the MVP done)
 
-- [ ] **Transcription quality pass** *(top priority)*
-  - [ ] Expose `WHISPER_LANGUAGE` env (skip auto-detect for non-English tables)
-  - [ ] `initial_prompt` support seeded with campaign proper nouns (NPC/place
-        names massively improve whisper accuracy on fantasy vocabulary)
-  - [ ] Chunk-boundary stitching: merge segments that whisper splits across
-        the 20 s rotation seam
-  - [ ] Show interim "transcribing…" state in the room when jobs are queued
-- [ ] Reconnect/resync in the room: on WS reconnect, replay recent events
+- [x] **Transcription quality pass** *(top priority)*
+  - [x] Expose `WHISPER_LANGUAGE` env (skip auto-detect for non-English tables)
+  - [x] `initial_prompt` support seeded with campaign proper nouns (NPC/place
+        names massively improve whisper accuracy on fantasy vocabulary) —
+        campaign name, session title, player names for now; extracted
+        NPC/location names join in Phase 2
+  - [x] Chunk-boundary stitching: merge segments that whisper splits across
+        the 20 s rotation seam (same-speaker segments ≤2 s apart)
+  - [x] Show interim "transcribing…" state in the room when jobs are queued
+- [x] Reconnect/resync in the room: on WS reconnect, replay recent events
       and transcript instead of starting blank
-- [ ] Session page auto-refresh when the GM starts a scheduled session
-      (currently players refresh manually)
-- [ ] Archive: transcript search-in-page and per-speaker filter
+- [x] Session page auto-refresh when the GM starts a scheduled session
+- [x] Archive: transcript search-in-page and per-speaker filter
 - [ ] GM notes + pinned facts panel (in the spec's room layout, not yet built)
-- [ ] Attendance derived from room presence, not just event authorship
-- [ ] Configurable STUN/TURN servers via env
-- [ ] Backup story: document copying `/data`; add `sqlite3 .backup` helper
-- [ ] CI: GitHub Actions — lint (ruff), the smoke test suite, docker build
+- [x] Attendance derived from room presence, not just event authorship
+- [x] Configurable STUN/TURN servers via env (`TABLECAST_ICE_SERVERS`)
+- [x] Backup story: documented `VACUUM INTO` snapshot + volume copy in README
+- [x] CI: GitHub Actions — lint (ruff), the smoke test suite, docker build
 
 ## Phase 2 — Campaign archive
 
-- [ ] Full-text search across transcripts/chat/notes (SQLite FTS5)
-- [ ] Entity extraction (NPCs, locations, factions) from transcripts into a
-      campaign glossary; feed it back into whisper `initial_prompt` (loop!)
-- [ ] Campaign timeline view (sessions × markers × reveals)
-- [ ] "Campaign memory" cross-references ("Fort Robespierre also came up in
-      Sessions 3 and 5")
+- [x] Full-text search across transcripts/chat/markers (SQLite FTS5 with
+      snippets and highlights; LIKE fallback on other databases)
+- [x] Entity extraction into a campaign glossary — heuristic proper-noun
+      mining (no ML dependency); feeds back into whisper `initial_prompt`
+      so recurring names transcribe correctly (the loop!)
+- [x] Campaign timeline view (sessions × markers)
+- [x] "Campaign memory" cross-references on archive pages ("Fort Robespierre
+      also came up in Sessions 3 and 5")
 - [ ] AI recap/summary/open-threads generation — pluggable backend (local
-      model or API), filling the placeholder sections in the Markdown export
-- [ ] Obsidian-vault-shaped export (folder of linked pages, not one file)
+      model or OpenAI-compatible API), filling the placeholder sections in
+      the Markdown export; also upgrades entity extraction
+- [x] Obsidian-vault-shaped export (zip of linked session + entity pages)
 - [ ] LiveKit option (SFU + TURN) behind a compose profile
 - [ ] Postgres option in compose
 

@@ -1,11 +1,14 @@
+import json
 from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 
 from .. import models
 from ..deps import DbDep, UserDep, require_member, templates
+from ..services import entities, export
+from ..services import search as search_service
 
 router = APIRouter()
 
@@ -68,10 +71,58 @@ def campaign_page(request: Request, db: DbDep, user: UserDep, campaign_id: int):
     )
     upcoming = [s for s in sessions if s.status in ("scheduled", "live")]
     past = [s for s in sessions if s.status == "ended"]
+
+    glossary = entities.campaign_glossary(db, campaign.id, limit=30)
+
+    # Timeline: past sessions in play order with their scene markers.
+    timeline = []
+    for s in reversed(past):
+        markers = (
+            db.query(models.SessionEvent)
+            .filter_by(session_id=s.id, kind="marker")
+            .order_by(models.SessionEvent.id)
+            .all()
+        )
+        timeline.append({
+            "session": s,
+            "markers": [json.loads(m.payload) for m in markers],
+        })
+
     return templates.TemplateResponse(
         request, "campaign.html",
         {"user": user, "campaign": campaign, "member": member,
-         "upcoming": upcoming, "past": past},
+         "upcoming": upcoming, "past": past,
+         "glossary": glossary, "timeline": timeline},
+    )
+
+
+@router.get("/campaigns/{campaign_id}/search")
+def search_campaign(request: Request, db: DbDep, user: UserDep, campaign_id: int, q: str = ""):
+    campaign, _member = require_member(db, campaign_id, user)
+    results = search_service.search(db, campaign_id, q)
+    # attach session titles for display
+    titles = {
+        s.id: s.title for s in
+        db.query(models.GameSession).filter_by(campaign_id=campaign_id).all()
+    }
+    grouped: dict[int, list[dict]] = {}
+    for r in results:
+        grouped.setdefault(int(r["session_id"]), []).append(r)
+    return templates.TemplateResponse(
+        request, "search.html",
+        {"user": user, "campaign": campaign, "q": q,
+         "grouped": grouped, "titles": titles, "total": len(results)},
+    )
+
+
+@router.get("/campaigns/{campaign_id}/export.zip")
+def export_vault(db: DbDep, user: UserDep, campaign_id: int):
+    campaign, _member = require_member(db, campaign_id, user)
+    payload = export.campaign_vault_zip(db, campaign)
+    filename = f"{export.safe_filename(campaign.name)}-vault.zip"
+    return Response(
+        payload, media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

@@ -1,8 +1,8 @@
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import Cookie, Depends, HTTPException, status
 from fastapi.templating import Jinja2Templates
-from pathlib import Path
 from sqlalchemy.orm import Session
 
 from . import config, models, security

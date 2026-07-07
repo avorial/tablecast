@@ -14,6 +14,9 @@ Env:
   WHISPER_MODEL           tiny | base | small | medium | large-v3  (default: base)
   WHISPER_DEVICE          cpu | cuda        (default: cpu)
   WHISPER_COMPUTE         int8 | float16 …  (default: int8)
+  WHISPER_LANGUAGE        ISO code like "en", "de" — skips per-chunk language
+                          auto-detection, which misfires on short/noisy chunks
+                          (default: auto-detect)
 """
 
 import logging
@@ -33,6 +36,7 @@ SHARED_TOKEN_FILE = Path(os.environ.get("TABLECAST_SHARED_DIR", "/shared")) / ".
 MODEL_NAME = os.environ.get("WHISPER_MODEL", "base")
 DEVICE = os.environ.get("WHISPER_DEVICE", "cpu")
 COMPUTE = os.environ.get("WHISPER_COMPUTE", "int8")
+LANGUAGE = os.environ.get("WHISPER_LANGUAGE") or None
 
 POLL_INTERVAL = 2.0
 HEADERS: dict[str, str] = {}
@@ -70,11 +74,15 @@ def process(client: httpx.Client, model: WhisperModel, job: dict) -> None:
         # Chunks are ~20s and independent, so cross-segment conditioning only
         # invites repetition hallucinations; greedy-only decoding keeps the
         # temperature-fallback sampler from producing garbage on hard audio.
+        # initial_prompt biases whisper toward the campaign's proper nouns
+        # (character and place names), which it otherwise mangles.
         segments, info = model.transcribe(
             tmp.name,
             vad_filter=True,
             condition_on_previous_text=False,
             temperature=0.0,
+            language=LANGUAGE,
+            initial_prompt=job.get("initial_prompt") or None,
         )
         out = [
             {"start": seg.start, "end": seg.end, "text": seg.text}

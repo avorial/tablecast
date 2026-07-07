@@ -15,9 +15,9 @@ from fastapi import (
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 
 from .. import config, models, security, ws
-from ..deps import DbDep, UserDep, require_session_member, templates
-from ..services import audio, export
 from ..db import SessionLocal
+from ..deps import DbDep, UserDep, require_session_member, templates
+from ..services import audio, entities, export
 
 router = APIRouter()
 
@@ -33,7 +33,8 @@ def session_page(request: Request, db: DbDep, user: UserDep, session_id: int):
     return templates.TemplateResponse(
         request, "room.html",
         {"user": user, "game": game, "campaign": game.campaign,
-         "is_gm": member.role == "gm"},
+         "is_gm": member.role == "gm",
+         "ice_servers": json.dumps(config.ICE_SERVERS)},
     )
 
 
@@ -57,11 +58,35 @@ def _archive_page(request, db, user, game, member):
          "at_seconds": e.at_seconds, "payload": json.loads(e.payload)}
         for e in events
     ]
+    merged = export.merged_segments(segments)
+    speakers = sorted({seg["name"] for seg in merged})
+
+    # Campaign memory: names mentioned this session, with cross-references
+    # to the other sessions where they appear. Lazily (re)extract if the
+    # transcript exists but no mentions were recorded (e.g. worker finished
+    # after the end-of-session refresh).
+    mentions = db.query(models.EntityMention).filter_by(session_id=game.id).all()
+    if segments and not mentions:
+        entities.refresh_session_entities(db, game)
+        mentions = db.query(models.EntityMention).filter_by(session_id=game.id).all()
+    connections = []
+    for m in sorted(mentions, key=lambda m: -m.count):
+        others = [
+            {"id": o.session.id, "title": o.session.title}
+            for o in m.entity.mentions if o.session_id != game.id
+        ]
+        connections.append({
+            "name": m.entity.name, "count": m.count,
+            "others": sorted(others, key=lambda s: s["id"]),
+        })
+
     return templates.TemplateResponse(
         request, "archive.html",
         {"user": user, "game": game, "campaign": game.campaign,
          "is_gm": member.role == "gm", "events": parsed_events,
-         "segments": segments, "recordings": recordings, "attendees": attendees},
+         "segments": merged, "speakers": speakers,
+         "recordings": recordings, "attendees": attendees,
+         "connections": connections},
     )
 
 
@@ -91,7 +116,28 @@ async def end_session(db: DbDep, user: UserDep, session_id: int):
         threading.Thread(
             target=audio.finalize_session_audio, args=(session_id,), daemon=True
         ).start()
+        threading.Thread(
+            target=_refresh_entities_later, args=(session_id,), daemon=True
+        ).start()
     return RedirectResponse(f"/sessions/{session_id}", status_code=303)
+
+
+def _refresh_entities_later(session_id: int, delay_s: float = 15.0) -> None:
+    """First campaign-memory pass shortly after session end; the worker's
+    queue-drain hook re-runs it when late transcripts finish."""
+    import time
+    time.sleep(delay_s)
+    db = SessionLocal()
+    try:
+        game = db.get(models.GameSession, session_id)
+        if game is not None:
+            entities.refresh_session_entities(db, game)
+    except Exception:
+        import logging
+        logging.getLogger("tablecast.entities").exception(
+            "entity refresh failed for session %s", session_id)
+    finally:
+        db.close()
 
 
 @router.post("/sessions/{session_id}/chunks")
@@ -128,6 +174,10 @@ async def upload_chunk(
         path=str(path), offset_s=max(0.0, offset),
     ))
     db.commit()
+    from .internal import pending_count
+    await ws.manager.broadcast(session_id, {
+        "type": "transcribe_queue", "pending": pending_count(db, session_id),
+    })
     return {"ok": True}
 
 

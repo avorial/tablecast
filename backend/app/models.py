@@ -136,6 +136,38 @@ class TranscriptSegment(Base):
     user: Mapped[User] = relationship()
 
 
+class CampaignEntity(Base):
+    """A recurring proper noun (NPC, place, faction) mined from transcripts
+    and chat — the campaign's memory. Phase 2 extraction is heuristic;
+    Phase 5 upgrades it with an LLM."""
+
+    __tablename__ = "campaign_entities"
+    __table_args__ = (UniqueConstraint("campaign_id", "name"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    kind: Mapped[str] = mapped_column(String(16), default="name")  # name|npc|place|faction
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    mentions: Mapped[list["EntityMention"]] = relationship(
+        back_populates="entity", cascade="all, delete-orphan"
+    )
+
+
+class EntityMention(Base):
+    __tablename__ = "entity_mentions"
+    __table_args__ = (UniqueConstraint("entity_id", "session_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entity_id: Mapped[int] = mapped_column(ForeignKey("campaign_entities.id"), index=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("game_sessions.id"), index=True)
+    count: Mapped[int] = mapped_column(Integer, default=1)
+
+    entity: Mapped[CampaignEntity] = relationship(back_populates="mentions")
+    session: Mapped[GameSession] = relationship()
+
+
 class Recording(Base):
     """Finalized audio artifacts produced at session end."""
 

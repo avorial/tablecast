@@ -113,6 +113,17 @@ ul.plain li { padding: 4px 0; }
 @keyframes pulse { 50% { opacity: 0.5; } }
 .roll-line { color: var(--accent); }
 .marker-line { color: var(--accent-2); }
+.search-bar { display: flex; gap: 8px; margin: 14px 0 20px; max-width: 560px; }
+.search-bar input { margin-top: 0; }
+.timeline-entry { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.timeline-entry:last-child { border-bottom: none; }
+mark { background: var(--accent); color: #1a1a1a; border-radius: 3px; padding: 0 2px; }
+.filter-row { display: flex; gap: 8px; margin-bottom: 10px; }
+.filter-row input, .filter-row select { margin-top: 0; }
+.filter-row select {
+  width: auto; padding: 8px 10px; background: var(--panel-2);
+  color: var(--text); border: 1px solid var(--border); border-radius: 6px; font: inherit;
+}
 
 @media (max-width: 900px) {
   #room { grid-template-columns: 1fr; height: auto; }

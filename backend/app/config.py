@@ -1,3 +1,5 @@
+import json
+import logging
 import os
 import secrets
 import stat
@@ -56,3 +58,16 @@ SESSION_TTL_SECONDS = 60 * 60 * 24 * 30  # 30 days
 
 # Allow open registration. Set to "false" once your table has signed up.
 REGISTRATION_OPEN = os.environ.get("TABLECAST_REGISTRATION_OPEN", "true").lower() != "false"
+
+# ICE servers for the WebRTC mesh, as a JSON array. Add a TURN server here
+# if players behind symmetric NAT can't connect, e.g.:
+# [{"urls":"stun:stun.l.google.com:19302"},
+#  {"urls":"turn:turn.example.com:3478","username":"u","credential":"p"}]
+_DEFAULT_ICE = [{"urls": "stun:stun.l.google.com:19302"}]
+try:
+    ICE_SERVERS = json.loads(os.environ.get("TABLECAST_ICE_SERVERS") or "null") or _DEFAULT_ICE
+except ValueError:
+    logging.getLogger("tablecast.config").error(
+        "TABLECAST_ICE_SERVERS is not valid JSON; using default STUN only"
+    )
+    ICE_SERVERS = _DEFAULT_ICE
