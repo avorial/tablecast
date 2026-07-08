@@ -432,9 +432,61 @@ async def main():
          and "- Fort Robespierre" in r.text
          and "- Why does the cargo bear the Dumont seal?" in r.text)
 
+    # --- Phase 4: Foundry export + RSS feed ---
+    r = gm.get(f"/campaigns/{cid}/foundry.json")
+    step("foundry export downloads", r.status_code == 200
+         and r.headers["content-type"].startswith("application/json"))
+    foundry = r.json()
+    step("foundry has session journal + cast",
+         isinstance(foundry, list)
+         and any(e["name"].startswith("Session 1") for e in foundry)
+         and any("Cast & Places" in e["name"] for e in foundry))
+    session_entry = [e for e in foundry if e["name"].startswith("Session 1")][0]
+    step("foundry session has recap + transcript pages",
+         any(p["name"] == "Recap" for p in session_entry["pages"])
+         and any(p["name"] == "Transcript" for p in session_entry["pages"]))
+    cast_entry = [e for e in foundry if "Cast & Places" in e["name"]][0]
+    step("foundry cast lists entities",
+         any(p["name"] == "Judith Dumont" for p in cast_entry["pages"]))
+
+    # feed token appears on the campaign page for the GM; grab it
+    r = gm.get(campaign_url)
+    m = re.search(r"/feeds/([\w-]+)/podcast\.xml", r.text)
+    step("feed url shown to gm", m is not None)
+    token = m.group(1)
+    step("feed hidden from players", "/feeds/" not in third.get(campaign_url).text)
+
+    # public feed: no auth, valid RSS. No episode yet (podcast not built here).
+    r = httpx.get(BASE + f"/feeds/{token}/podcast.xml", follow_redirects=False)
+    step("public feed reachable without auth",
+         r.status_code == 200 and r.headers["content-type"].startswith("application/rss+xml"))
+    step("feed is valid rss for the campaign",
+         "<rss" in r.text and "Port Sainte Jeanne" in r.text)
+    r = httpx.get(BASE + "/feeds/bogustoken/podcast.xml")
+    step("bogus feed token 404s", r.status_code == 404)
+
+    # rotating the token invalidates the old URL
+    r = gm.post(f"/campaigns/{cid}/feed/rotate")
+    step("gm rotates feed token", r.status_code == 303)
+    r = httpx.get(BASE + f"/feeds/{token}/podcast.xml")
+    step("old feed url dead after rotate", r.status_code == 404)
+    r = player.post(f"/campaigns/{cid}/feed/rotate")
+    step("player can't rotate feed", r.status_code == 403)
+
     # --- Phase 3: aligned audio + podcast bundle (needs real ffmpeg) ---
     if have_ffmpeg():
         await podcast_flow(gm, player, cid, gm_cookie)
+        # a built episode now appears in the RSS feed as an enclosure
+        r = gm.get(campaign_url)
+        token2 = re.search(r"/feeds/([\w-]+)/podcast\.xml", r.text).group(1)
+        r = httpx.get(BASE + f"/feeds/{token2}/podcast.xml")
+        step("feed lists built episode as enclosure",
+             "<enclosure" in r.text and "episodes/" in r.text and "audio/mp4" in r.text)
+        m = re.search(r'url="[^"]*/feeds/[\w-]+/episodes/(\d+)\.m4a"', r.text)
+        step("episode enclosure url present", m is not None)
+        r = httpx.get(BASE + f"/feeds/{token2}/episodes/{m.group(1)}.m4a")
+        step("episode media served without auth",
+             r.status_code == 200 and len(r.content) > 20_000)
     else:
         print("SKIP  podcast pipeline (no ffmpeg on this machine)")
 
@@ -504,6 +556,7 @@ async def podcast_flow(gm, player, cid, gm_cookie):
     m = re.search(r'href="(/sessions/%d/recordings/\d+)">episode\.m4a' % sid, page)
     r = gm.get(m.group(1))
     step("episode.m4a non-trivial", len(r.content) > 20_000, f"{len(r.content)} bytes")
+    return sid
 
 
 if __name__ == "__main__":

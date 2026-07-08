@@ -59,6 +59,11 @@ SESSION_TTL_SECONDS = 60 * 60 * 24 * 30  # 30 days
 # Allow open registration. Set to "false" once your table has signed up.
 REGISTRATION_OPEN = os.environ.get("TABLECAST_REGISTRATION_OPEN", "true").lower() != "false"
 
+# Public base URL (scheme + host, no trailing slash), used to build absolute
+# links in the RSS podcast feed — podcast apps need fully-qualified URLs.
+# When unset, links are derived from the incoming request.
+PUBLIC_BASE_URL = os.environ.get("TABLECAST_PUBLIC_BASE_URL", "").rstrip("/")
+
 # ICE servers for the WebRTC mesh, as a JSON array. Add a TURN server here
 # if players behind symmetric NAT can't connect, e.g.:
 # [{"urls":"stun:stun.l.google.com:19302"},

@@ -42,6 +42,11 @@ class Campaign(Base):
     join_code: Mapped[str] = mapped_column(
         String(12), unique=True, default=lambda: secrets.token_urlsafe(6)
     )
+    # Unguessable token for the public RSS podcast feed (podcast apps can't
+    # authenticate). Rotate to revoke a shared feed.
+    feed_token: Mapped[str] = mapped_column(
+        String(32), unique=True, index=True, default=lambda: secrets.token_urlsafe(18)
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     gm: Mapped[User] = relationship()

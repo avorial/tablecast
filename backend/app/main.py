@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .db import init_db
-from .routers import auth, campaigns, internal, sessions
+from .routers import auth, campaigns, feeds, internal, sessions
 from .services import search
 
 logging.basicConfig(level=logging.INFO)
@@ -26,6 +26,7 @@ app.include_router(auth.router)
 app.include_router(campaigns.router)
 app.include_router(sessions.router)
 app.include_router(internal.router)
+app.include_router(feeds.router)
 
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 

@@ -80,6 +80,26 @@
       <p><a href="/campaigns/{{ campaign.id }}/export.zip">📦 Obsidian vault (.zip)</a></p>
       <p class="muted small">Linked pages for every session and every
         recurring name — unzip straight into your vault.</p>
+      <p><a href="/campaigns/{{ campaign.id }}/foundry.json">🎲 Foundry VTT journal (.json)</a></p>
+      <p class="muted small">Import as a compendium of journal entries, one
+        per session, plus a page per NPC/location.</p>
+    </div>
+    {% endif %}
+
+    {% if member.role == "gm" %}
+    <div class="card">
+      <h2>Podcast feed</h2>
+      <p class="muted small">Subscribe in any podcast app. Anyone with this
+        link can listen — keep it private, rotate to revoke.</p>
+      <p><input type="text" readonly class="feed-url"
+         value="{{ feed_url }}" onclick="this.select()"></p>
+      <div class="btn-row">
+        <a href="/feeds/{{ campaign.feed_token }}/podcast.xml" target="_blank"><button type="button">Open feed</button></a>
+        <form method="post" action="/campaigns/{{ campaign.id }}/feed/rotate"
+              onsubmit="return confirm('Rotate the feed URL? Existing subscribers will stop receiving episodes.')">
+          <button class="danger">Rotate URL</button>
+        </form>
+      </div>
     </div>
     {% endif %}
 

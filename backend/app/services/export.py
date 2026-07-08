@@ -227,3 +227,111 @@ def campaign_vault_zip(db: Session, campaign: models.Campaign) -> bytes:
         zf.writestr(f"{safe_filename(campaign.name)}.md", "\n".join(idx))
 
     return buf.getvalue()
+
+
+def _html_escape(text: str) -> str:
+    return (
+        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+
+
+def _text_page(name: str, html: str, level: int = 1) -> dict:
+    """A Foundry VTT v10+ JournalEntryPage of type 'text' (HTML content)."""
+    return {
+        "name": name,
+        "type": "text",
+        "title": {"show": True, "level": level},
+        "text": {"format": 1, "content": html},  # format 1 = HTML
+    }
+
+
+def campaign_foundry_json(db: Session, campaign: models.Campaign) -> str:
+    """Foundry VTT import: an array of JournalEntry documents (v10+), one per
+    finished session plus a campaign 'Cast & Places' entry. Import via a
+    world's Journal directory or a compendium."""
+    sessions = [s for s in campaign.sessions if s.status == "ended"]
+    sessions.sort(key=lambda s: s.id)
+
+    entries: list[dict] = []
+
+    for game in sessions:
+        events = (
+            db.query(models.SessionEvent)
+            .filter_by(session_id=game.id)
+            .order_by(models.SessionEvent.created_at)
+            .all()
+        )
+        segments = (
+            db.query(models.TranscriptSegment)
+            .filter_by(session_id=game.id)
+            .order_by(models.TranscriptSegment.start_s)
+            .all()
+        )
+        pages: list[dict] = []
+
+        summary = None
+        srow = db.query(models.SessionSummary).filter_by(session_id=game.id).first()
+        if srow:
+            try:
+                summary = json.loads(srow.payload)
+            except json.JSONDecodeError:
+                summary = None
+        if summary and summary.get("recap"):
+            recap_html = "".join(
+                f"<p>{_html_escape(p)}</p>" for p in summary["recap"].split("\n\n")
+            )
+            if summary.get("bullets"):
+                recap_html += "<ul>" + "".join(
+                    f"<li>{_html_escape(b)}</li>" for b in summary["bullets"]
+                ) + "</ul>"
+            pages.append(_text_page("Recap", recap_html))
+            for label, key in (("NPCs", "npcs"), ("Locations", "locations"),
+                               ("Open Threads", "open_threads")):
+                items = summary.get(key) or []
+                if items:
+                    html = "<ul>" + "".join(
+                        f"<li>{_html_escape(i)}</li>" for i in items) + "</ul>"
+                    pages.append(_text_page(label, html, level=2))
+
+        markers = [e for e in events if e.kind == "marker"]
+        if markers:
+            rows = []
+            for e in markers:
+                payload = json.loads(e.payload)
+                note = f" — {_html_escape(payload['note'])}" if payload.get("note") else ""
+                rows.append(f"<li><strong>{_html_escape(payload.get('label', 'Marker'))}"
+                            f"</strong>{note}</li>")
+            pages.append(_text_page("Scene Markers", "<ul>" + "".join(rows) + "</ul>", level=2))
+
+        if segments:
+            body = "".join(
+                f"<p><strong>{_html_escape(seg['name'])}:</strong> "
+                f"{_html_escape(seg['text'])}</p>"
+                for seg in merged_segments(segments)
+            )
+            pages.append(_text_page("Transcript", body, level=2))
+
+        if not pages:
+            pages.append(_text_page("Session", "<p>No content recorded.</p>"))
+
+        entries.append({"name": _session_page_name(game), "pages": pages})
+
+    # Cast & Places entry: one page per entity with its appearances.
+    entity_rows = [
+        e for e in db.query(models.CampaignEntity).filter_by(campaign_id=campaign.id).all()
+        if e.mentions
+    ]
+    entity_rows.sort(key=lambda e: -sum(m.count for m in e.mentions))
+    if entity_rows:
+        pages = []
+        for entity in entity_rows:
+            total = sum(m.count for m in entity.mentions)
+            appearances = "".join(
+                f"<li>{_html_escape(m.session.title)} — {m.count}×</li>"
+                for m in sorted(entity.mentions, key=lambda m: m.session_id)
+            )
+            html = f"<p>Mentioned {total}× across the campaign.</p><ul>{appearances}</ul>"
+            pages.append(_text_page(entity.name, html, level=2))
+        entries.append({"name": f"{campaign.name} — Cast & Places", "pages": pages})
+
+    return json.dumps(entries, indent=2)
