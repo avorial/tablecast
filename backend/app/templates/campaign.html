@@ -80,6 +80,54 @@
       <p><a href="/campaigns/{{ campaign.id }}/export.zip">📦 Obsidian vault (.zip)</a></p>
       <p class="muted small">Linked pages for every session and every
         recurring name — unzip straight into your vault.</p>
+      <p><a href="/campaigns/{{ campaign.id }}/foundry.json">🎲 Foundry VTT journal (.json)</a></p>
+      <p class="muted small">Import as a compendium of journal entries, one
+        per session, plus a page per NPC/location.</p>
+    </div>
+    {% endif %}
+
+    {% if member.role == "gm" %}
+    <div class="card">
+      <h2>Podcast feed</h2>
+      <p class="muted small">Subscribe in any podcast app. Anyone with this
+        link can listen — keep it private, rotate to revoke.</p>
+      <p><input type="text" readonly class="feed-url"
+         value="{{ feed_url }}" onclick="this.select()"></p>
+      <div class="btn-row">
+        <a href="/feeds/{{ campaign.feed_token }}/podcast.xml" target="_blank"><button type="button">Open feed</button></a>
+        <form method="post" action="/campaigns/{{ campaign.id }}/feed/rotate"
+              onsubmit="return confirm('Rotate the feed URL? Existing subscribers will stop receiving episodes.')">
+          <button class="danger">Rotate URL</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>GitHub export</h2>
+      <p class="muted small">Commit a Markdown page per session to a repo.
+        Use a fine-grained token scoped to that repo's contents.</p>
+      <form method="post" action="/campaigns/{{ campaign.id }}/github/config">
+        <label>Repository (owner/name)
+          <input type="text" name="repo" required placeholder="me/my-campaign"
+                 value="{{ github.repo if github else '' }}"></label>
+        <label>Branch
+          <input type="text" name="branch" value="{{ github.branch if github else 'main' }}"></label>
+        <label>Path prefix (optional)
+          <input type="text" name="path_prefix" placeholder="sessions/"
+                 value="{{ github.path_prefix if github else '' }}"></label>
+        <label>Access token {% if github %}<span class="muted small">(leave blank to keep current)</span>{% endif %}
+          <input type="password" name="token" {{ 'required' if not github }} autocomplete="off"></label>
+        <button class="primary">{{ "Update" if github else "Save" }} config</button>
+      </form>
+      {% if github %}
+      <form method="post" action="/campaigns/{{ campaign.id }}/github/push" class="stack-top">
+        <button>Push to GitHub now</button>
+      </form>
+      {% if github.last_status %}
+      <p class="muted small">Last: {{ github.last_status }}
+        {% if github.last_pushed_at %}({{ github.last_pushed_at.strftime("%Y-%m-%d %H:%M") }}){% endif %}</p>
+      {% endif %}
+      {% endif %}
     </div>
     {% endif %}
 

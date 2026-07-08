@@ -42,6 +42,11 @@ class Campaign(Base):
     join_code: Mapped[str] = mapped_column(
         String(12), unique=True, default=lambda: secrets.token_urlsafe(6)
     )
+    # Unguessable token for the public RSS podcast feed (podcast apps can't
+    # authenticate). Rotate to revoke a shared feed.
+    feed_token: Mapped[str] = mapped_column(
+        String(32), unique=True, index=True, default=lambda: secrets.token_urlsafe(18)
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     gm: Mapped[User] = relationship()
@@ -136,6 +141,26 @@ class TranscriptSegment(Base):
     text: Mapped[str] = mapped_column(Text)
 
     user: Mapped[User] = relationship()
+
+
+class GithubExport(Base):
+    """Per-campaign GitHub commit-export config. The token is stored in the
+    database (self-hosted, single-group tool); use a fine-grained PAT scoped
+    to just the target repo's contents."""
+
+    __tablename__ = "github_exports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), unique=True, index=True)
+    repo: Mapped[str] = mapped_column(String(200))       # "owner/name"
+    branch: Mapped[str] = mapped_column(String(120), default="main")
+    path_prefix: Mapped[str] = mapped_column(String(200), default="")  # e.g. "sessions/"
+    token: Mapped[str] = mapped_column(String(255))
+    api_base: Mapped[str] = mapped_column(String(200), default="https://api.github.com")
+    last_status: Mapped[str] = mapped_column(String(300), default="")
+    last_pushed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class CampaignEntity(Base):

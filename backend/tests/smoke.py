@@ -75,6 +75,41 @@ def start_stub_llm():
     return server
 
 
+GH_PORT = int(os.environ.get("SMOKE_PORT", "8399")) + 2
+GH_PUT_FILES = {}  # path -> content (decoded)
+
+
+def start_stub_github():
+    """Minimal GitHub Contents API: GET returns 404 (new file), PUT records
+    the decoded content and returns 201."""
+    import base64
+    import http.server
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b'{"message":"Not Found"}')
+
+        def do_PUT(self):
+            raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            body = json.loads(raw)
+            path = self.path.split("/contents/", 1)[1].split("?")[0]
+            GH_PUT_FILES[path] = base64.b64decode(body["content"]).decode()
+            self.send_response(201)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"content":{"sha":"deadbeef"}}')
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", GH_PORT), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
 def step(name, ok, detail=""):
     global FAILED
     print(f"{'PASS' if ok else 'FAIL'}  {name}  {detail}")
@@ -432,9 +467,91 @@ async def main():
          and "- Fort Robespierre" in r.text
          and "- Why does the cargo bear the Dumont seal?" in r.text)
 
+    # --- Phase 4: Foundry export + RSS feed ---
+    r = gm.get(f"/campaigns/{cid}/foundry.json")
+    step("foundry export downloads", r.status_code == 200
+         and r.headers["content-type"].startswith("application/json"))
+    foundry = r.json()
+    step("foundry has session journal + cast",
+         isinstance(foundry, list)
+         and any(e["name"].startswith("Session 1") for e in foundry)
+         and any("Cast & Places" in e["name"] for e in foundry))
+    session_entry = [e for e in foundry if e["name"].startswith("Session 1")][0]
+    step("foundry session has recap + transcript pages",
+         any(p["name"] == "Recap" for p in session_entry["pages"])
+         and any(p["name"] == "Transcript" for p in session_entry["pages"]))
+    cast_entry = [e for e in foundry if "Cast & Places" in e["name"]][0]
+    step("foundry cast lists entities",
+         any(p["name"] == "Judith Dumont" for p in cast_entry["pages"]))
+
+    # feed token appears on the campaign page for the GM; grab it
+    r = gm.get(campaign_url)
+    m = re.search(r"/feeds/([\w-]+)/podcast\.xml", r.text)
+    step("feed url shown to gm", m is not None)
+    token = m.group(1)
+    step("feed hidden from players", "/feeds/" not in third.get(campaign_url).text)
+
+    # public feed: no auth, valid RSS. No episode yet (podcast not built here).
+    r = httpx.get(BASE + f"/feeds/{token}/podcast.xml", follow_redirects=False)
+    step("public feed reachable without auth",
+         r.status_code == 200 and r.headers["content-type"].startswith("application/rss+xml"))
+    step("feed is valid rss for the campaign",
+         "<rss" in r.text and "Port Sainte Jeanne" in r.text)
+    r = httpx.get(BASE + "/feeds/bogustoken/podcast.xml")
+    step("bogus feed token 404s", r.status_code == 404)
+
+    # rotating the token invalidates the old URL
+    r = gm.post(f"/campaigns/{cid}/feed/rotate")
+    step("gm rotates feed token", r.status_code == 303)
+    r = httpx.get(BASE + f"/feeds/{token}/podcast.xml")
+    step("old feed url dead after rotate", r.status_code == 404)
+    r = player.post(f"/campaigns/{cid}/feed/rotate")
+    step("player can't rotate feed", r.status_code == 403)
+
+    # --- Phase 4: GitHub commit export (against a stub Contents API) ---
+    r = player.post(f"/campaigns/{cid}/github/config",
+                    data={"repo": "x/y", "token": "t"})
+    step("player can't configure github", r.status_code == 403)
+    r = gm.post(f"/campaigns/{cid}/github/config",
+                data={"repo": "badrepo", "token": "t"})
+    step("github config rejects bad repo", r.status_code == 400)
+    r = gm.post(f"/campaigns/{cid}/github/config",
+                data={"repo": "me/campaign", "token": "ghp_stubtoken",
+                      "path_prefix": "sessions",
+                      "api_base": f"http://127.0.0.1:{GH_PORT}"})
+    step("gm configures github export", r.status_code == 303)
+    GH_PUT_FILES.clear()
+    r = gm.post(f"/campaigns/{cid}/github/push")
+    step("gm triggers github push", r.status_code == 303)
+    for _ in range(40):
+        if any(p.startswith("sessions/") for p in GH_PUT_FILES):
+            break
+        time.sleep(0.25)
+    step("github export committed README + session page",
+         "sessions/README.md" in GH_PUT_FILES
+         and any(p.endswith(".md") and "README" not in p for p in GH_PUT_FILES),
+         str(list(GH_PUT_FILES)))
+    step("committed session page has transcript",
+         any("customs office" in c for c in GH_PUT_FILES.values()))
+    r = gm.get(campaign_url)
+    step("github status shown after push", "Pushed" in r.text)
+    r = player.post(f"/campaigns/{cid}/github/push")
+    step("player can't push to github", r.status_code == 403)
+
     # --- Phase 3: aligned audio + podcast bundle (needs real ffmpeg) ---
     if have_ffmpeg():
         await podcast_flow(gm, player, cid, gm_cookie)
+        # a built episode now appears in the RSS feed as an enclosure
+        r = gm.get(campaign_url)
+        token2 = re.search(r"/feeds/([\w-]+)/podcast\.xml", r.text).group(1)
+        r = httpx.get(BASE + f"/feeds/{token2}/podcast.xml")
+        step("feed lists built episode as enclosure",
+             "<enclosure" in r.text and "episodes/" in r.text and "audio/mp4" in r.text)
+        m = re.search(r'url="[^"]*/feeds/[\w-]+/episodes/(\d+)\.m4a"', r.text)
+        step("episode enclosure url present", m is not None)
+        r = httpx.get(BASE + f"/feeds/{token2}/episodes/{m.group(1)}.m4a")
+        step("episode media served without auth",
+             r.status_code == 200 and len(r.content) > 20_000)
     else:
         print("SKIP  podcast pipeline (no ffmpeg on this machine)")
 
@@ -504,10 +621,12 @@ async def podcast_flow(gm, player, cid, gm_cookie):
     m = re.search(r'href="(/sessions/%d/recordings/\d+)">episode\.m4a' % sid, page)
     r = gm.get(m.group(1))
     step("episode.m4a non-trivial", len(r.content) > 20_000, f"{len(r.content)} bytes")
+    return sid
 
 
 if __name__ == "__main__":
     stub_llm = start_stub_llm()
+    stub_gh = start_stub_github()
     with tempfile.TemporaryDirectory() as tmp:
         server = start_server(tmp)
         try:
@@ -521,4 +640,5 @@ if __name__ == "__main__":
             except subprocess.TimeoutExpired:
                 server.kill()
             stub_llm.shutdown()
+            stub_gh.shutdown()
     sys.exit(1 if FAILED else 0)

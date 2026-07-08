@@ -36,7 +36,21 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 # (table, column, DDL type + default)
 _MIGRATIONS = [
     ("game_sessions", "podcast_status", "VARCHAR(16) NOT NULL DEFAULT ''"),
+    # Added nullable, then backfilled with unique per-row tokens below.
+    ("campaigns", "feed_token", "VARCHAR(32)"),
 ]
+
+
+def _backfill_feed_tokens(conn) -> None:
+    import secrets
+    rows = conn.execute(
+        text("SELECT id FROM campaigns WHERE feed_token IS NULL OR feed_token = ''")
+    ).fetchall()
+    for (cid,) in rows:
+        conn.execute(
+            text("UPDATE campaigns SET feed_token = :t WHERE id = :id"),
+            {"t": secrets.token_urlsafe(18), "id": cid},
+        )
 
 
 def _ensure_columns() -> None:
@@ -49,6 +63,8 @@ def _ensure_columns() -> None:
             if column not in existing:
                 log.info("migrating: adding %s.%s", table, column)
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+                if (table, column) == ("campaigns", "feed_token"):
+                    _backfill_feed_tokens(conn)
 
 
 def init_db() -> None:

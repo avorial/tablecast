@@ -68,6 +68,11 @@ see [Configuration](#configuration) below.
    markers, `chapters.txt`, `show-notes.md` (from the AI recap), and
    per-speaker WAVs for DAW editing. Drop `intro.mp3`/`outro.mp3` into
    `/data/podcast/` and they're stitched on, chapters shifted automatically.
+10. Each campaign has a private **RSS podcast feed** (subscribe in any podcast
+    app — built episodes appear automatically) and exports to an **Obsidian
+    vault**, a **Foundry VTT journal**, or a **GitHub repo** (commits a
+    Markdown page per session via the API — configure repo + token on the
+    campaign page).
 
 ## Architecture
 
