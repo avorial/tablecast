@@ -552,10 +552,79 @@ async def main():
         r = httpx.get(BASE + f"/feeds/{token2}/episodes/{m.group(1)}.m4a")
         step("episode media served without auth",
              r.status_code == 200 and len(r.content) > 20_000)
+
+        # --- Phase 4: Craig import ---
+        await craig_import_flow(gm, player, cid)
     else:
-        print("SKIP  podcast pipeline (no ffmpeg on this machine)")
+        print("SKIP  podcast + craig import pipeline (no ffmpeg on this machine)")
 
     print("\nALL SMOKE TESTS PASSED")
+
+
+async def craig_import_flow(gm, player, cid):
+    import io
+    import zipfile as zf_mod
+
+    # A Craig-style multi-track zip: one FLAC per speaker. "GM Greta" and
+    # "Player Josh" are members; "Randal" is not (should be skipped).
+    with tempfile.TemporaryDirectory() as tmp:
+        buf = io.BytesIO()
+        with zf_mod.ZipFile(buf, "w") as zf:
+            for i, (fname, freq) in enumerate([
+                ("1-GM Greta_1234.flac", 300),
+                ("2-Player Josh.flac", 500),
+                ("3-Randal#9.flac", 700),
+            ]):
+                p = f"{tmp}/t{i}.flac"
+                subprocess.run(
+                    ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                     "-f", "lavfi", "-i", f"sine=frequency={freq}:duration=2",
+                     p], check=True)
+                zf.write(p, fname)
+            zf.writestr("info.txt", "Craig recording")  # non-audio, ignored
+        payload = buf.getvalue()
+
+    # player can't import
+    r = player.post(f"/campaigns/{cid}/import/craig",
+                    files={"file": ("rec.zip", payload, "application/zip")},
+                    data={"title": "Imported Session"})
+    step("player can't import craig", r.status_code == 403)
+
+    r = gm.post(f"/campaigns/{cid}/import/craig",
+                files={"file": ("rec.zip", payload, "application/zip")},
+                data={"title": "Imported Session", "date": "2026-06-01"})
+    step("gm imports craig zip", r.status_code == 303, r.headers.get("location", ""))
+    loc = r.headers["location"]
+    step("import reports 2 matched + 1 skipped",
+         "imported=2" in loc and "skipped=1" in loc, loc)
+    isid = int(loc.split("/sessions/")[1].split("?")[0])
+
+    # session exists, ended, with two speakers' chunks queued for transcription
+    r = gm.get(f"/sessions/{isid}")
+    step("imported session archive renders", r.status_code == 200 and "Imported Session" in r.text)
+
+    # worker claims the imported tracks (real audio → whisper runs on them)
+    for _ in range(60):
+        page = gm.get(f"/sessions/{isid}").text
+        if "mixed.mp3" in page:
+            break
+        time.sleep(1)
+    step("imported audio finalized to aligned tracks + mix",
+         "mixed.mp3" in page and page.count("speaker") >= 1)
+
+    # a zip with no matching members is rejected cleanly
+    with tempfile.TemporaryDirectory() as tmp:
+        buf = io.BytesIO()
+        with zf_mod.ZipFile(buf, "w") as zf:
+            p = f"{tmp}/x.flac"
+            subprocess.run(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                 "-f", "lavfi", "-i", "sine=frequency=200:duration=1", p], check=True)
+            zf.write(p, "1-Nobody.flac")
+        r = gm.post(f"/campaigns/{cid}/import/craig",
+                    files={"file": ("rec.zip", buf.getvalue(), "application/zip")},
+                    data={"title": "No Match"})
+    step("craig import with no matches rejected", r.status_code == 400)
 
 
 async def podcast_flow(gm, player, cid, gm_cookie):

@@ -3,6 +3,14 @@
 {% block content %}
 <p><a href="/campaigns/{{ campaign.id }}">← {{ campaign.name }}</a></p>
 <h1>{{ game.title }}</h1>
+{% if imported %}
+<div class="card notice">
+  ✅ Imported {{ imported }} speaker track(s).
+  {% if skipped %}<strong>{{ skipped }} track(s) skipped</strong> — no matching
+  campaign member; rename those members or the track files and re-import.{% endif %}
+  Transcription runs in the background — refresh in a bit.
+</div>
+{% endif %}
 <p class="muted">
   {% if game.started_at %}{{ game.started_at.strftime("%Y-%m-%d %H:%M") }}{% endif %}
   {% if attendees %} · Attending: {{ attendees | join(", ") }}{% endif %}

@@ -73,6 +73,9 @@ see [Configuration](#configuration) below.
     vault**, a **Foundry VTT journal**, or a **GitHub repo** (commits a
     Markdown page per session via the API — configure repo + token on the
     campaign page).
+11. Already have recordings? **Import a [Craig](https://github.com/CraigChat/craig)
+    multi-track zip** on the campaign page — each speaker track is matched to
+    a member and ingested as a session (transcript, recap, podcast all follow).
 
 ## Architecture
 
