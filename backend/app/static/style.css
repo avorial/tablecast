@@ -137,6 +137,7 @@ ul.plain li { padding: 4px 0; }
 .p-panel-row input[type="range"] { flex: 1; margin: 0; width: auto; padding: 0; accent-color: var(--accent); }
 .vol-pct { min-width: 38px; text-align: right; }
 .feed-url { font-family: monospace; font-size: 0.82rem; }
+.card.notice { border-color: var(--accent); background: var(--panel-2); }
 .search-bar { display: flex; gap: 8px; margin: 14px 0 20px; max-width: 560px; }
 .search-bar input { margin-top: 0; }
 .timeline-entry { padding: 8px 0; border-bottom: 1px solid var(--border); }

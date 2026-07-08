@@ -94,6 +94,8 @@ def _archive_page(request, db, user, game, member):
             "others": sorted(others, key=lambda s: s["id"]),
         })
 
+    imported = request.query_params.get("imported")
+    skipped = request.query_params.get("skipped")
     return templates.TemplateResponse(
         request, "archive.html",
         {"user": user, "game": game, "campaign": game.campaign,
@@ -102,7 +104,8 @@ def _archive_page(request, db, user, game, member):
          "recordings": recordings, "attendees": attendees,
          "connections": connections,
          "summary": recap.get_summary(db, game.id),
-         "llm_enabled": config.LLM_ENABLED},
+         "llm_enabled": config.LLM_ENABLED,
+         "imported": imported, "skipped": skipped},
     )
 
 

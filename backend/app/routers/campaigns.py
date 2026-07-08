@@ -4,14 +4,16 @@ import threading
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
 
 from .. import config, models
 from ..db import SessionLocal
 from ..deps import DbDep, UserDep, require_member, templates
-from ..services import entities, export, github_export
+from ..services import audio, craig_import, entities, export, github_export
 from ..services import search as search_service
+
+MAX_CRAIG_ZIP_BYTES = 600 * 1024 * 1024
 
 router = APIRouter()
 
@@ -159,6 +161,45 @@ def rotate_feed(db: DbDep, user: UserDep, campaign_id: int):
     campaign.feed_token = secrets.token_urlsafe(18)
     db.commit()
     return RedirectResponse(f"/campaigns/{campaign_id}", status_code=303)
+
+
+@router.post("/campaigns/{campaign_id}/import/craig")
+async def import_craig(
+    db: DbDep, user: UserDep, campaign_id: int,
+    file: UploadFile,
+    title: Annotated[str, Form()],
+    date: Annotated[str, Form()] = "",
+):
+    campaign, member = require_member(db, campaign_id, user)
+    if member.role != "gm":
+        raise HTTPException(403, "Only the GM can import recordings")
+    data = await file.read()
+    if len(data) > MAX_CRAIG_ZIP_BYTES:
+        raise HTTPException(413, "Zip too large")
+    started_at = None
+    if date:
+        try:
+            started_at = datetime.fromisoformat(date)
+        except ValueError:
+            raise HTTPException(400, "Invalid date")
+    try:
+        result = craig_import.import_craig_zip(
+            db, campaign, title, data, started_at=started_at
+        )
+    except craig_import.CraigImportError as exc:
+        raise HTTPException(400, str(exc))
+
+    sid = result["session_id"]
+    # Build aligned tracks + mixdown now; the worker transcribes the chunks
+    # and the queue-drain hook then extracts entities + recap.
+    threading.Thread(
+        target=audio.finalize_session_audio, args=(sid, 0), daemon=True
+    ).start()
+    skipped = result["skipped"]
+    suffix = f"?imported={len(result['matched'])}"
+    if skipped:
+        suffix += f"&skipped={len(skipped)}"
+    return RedirectResponse(f"/sessions/{sid}{suffix}", status_code=303)
 
 
 @router.post("/campaigns/{campaign_id}/github/config")

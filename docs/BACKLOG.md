@@ -68,11 +68,10 @@ Working list, ordered within each bucket. The phase map lives in
       session (recap/markers/transcript pages) plus a Cast & Places entry
 - [x] GitHub commit export of session pages — per-campaign repo/token config,
       commits a Markdown page per session + index via the Contents API
-- [ ] Discord import (historical recordings/logs). Target
-      [Craig](https://github.com/CraigChat/craig) multi-track exports as the
-      primary ingest format — per-speaker tracks map 1:1 onto Tablecast's
-      recording model, so old Craig sessions can join the archive and get
-      transcribed like native ones
+- [x] Discord import via [Craig](https://github.com/CraigChat/craig)
+      multi-track zips — each speaker track is matched to a campaign member
+      by name and ingested as a native ended session (aligned tracks,
+      mixdown, transcription, entities, recap, podcast all follow)
 - [ ] S3-compatible storage backend
 
 ## Phase 5 — AI assistant

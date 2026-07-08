@@ -129,6 +129,20 @@
       {% endif %}
       {% endif %}
     </div>
+
+    <div class="card">
+      <h2>Import from Craig</h2>
+      <p class="muted small">Upload a Craig multi-track recording (.zip). Each
+        speaker track is matched to a campaign member by name, then
+        transcribed and finalized like a native session.</p>
+      <form method="post" action="/campaigns/{{ campaign.id }}/import/craig"
+            enctype="multipart/form-data">
+        <label>Session title <input type="text" name="title" required maxlength="200"></label>
+        <label>Date (optional) <input type="date" name="date"></label>
+        <label>Craig zip <input type="file" name="file" accept=".zip,application/zip" required></label>
+        <button class="primary">Import recording</button>
+      </form>
+    </div>
     {% endif %}
 
     {% if timeline %}
