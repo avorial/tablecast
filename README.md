@@ -70,7 +70,9 @@ see [Configuration](#configuration) below.
    `/data/podcast/` and they're stitched on, chapters shifted automatically.
 10. Each campaign has a private **RSS podcast feed** (subscribe in any podcast
     app — built episodes appear automatically) and exports to an **Obsidian
-    vault** or a **Foundry VTT journal**.
+    vault**, a **Foundry VTT journal**, or a **GitHub repo** (commits a
+    Markdown page per session via the API — configure repo + token on the
+    campaign page).
 
 ## Architecture
 

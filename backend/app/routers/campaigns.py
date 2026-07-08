@@ -1,5 +1,6 @@
 import json
 import secrets
+import threading
 from datetime import datetime
 from typing import Annotated
 
@@ -7,8 +8,9 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
 from .. import config, models
+from ..db import SessionLocal
 from ..deps import DbDep, UserDep, require_member, templates
-from ..services import entities, export
+from ..services import entities, export, github_export
 from ..services import search as search_service
 
 router = APIRouter()
@@ -98,11 +100,13 @@ def campaign_page(request: Request, db: DbDep, user: UserDep, campaign_id: int):
         })
 
     feed_url = f"{_base_url(request)}/feeds/{campaign.feed_token}/podcast.xml"
+    gh = db.query(models.GithubExport).filter_by(campaign_id=campaign.id).first()
     return templates.TemplateResponse(
         request, "campaign.html",
         {"user": user, "campaign": campaign, "member": member,
          "upcoming": upcoming, "past": past,
-         "glossary": glossary, "timeline": timeline, "feed_url": feed_url},
+         "glossary": glossary, "timeline": timeline, "feed_url": feed_url,
+         "github": gh},
     )
 
 
@@ -154,6 +158,52 @@ def rotate_feed(db: DbDep, user: UserDep, campaign_id: int):
         raise HTTPException(403, "Only the GM can rotate the feed URL")
     campaign.feed_token = secrets.token_urlsafe(18)
     db.commit()
+    return RedirectResponse(f"/campaigns/{campaign_id}", status_code=303)
+
+
+@router.post("/campaigns/{campaign_id}/github/config")
+def configure_github(
+    db: DbDep, user: UserDep, campaign_id: int,
+    repo: Annotated[str, Form()],
+    token: Annotated[str, Form()] = "",
+    branch: Annotated[str, Form()] = "main",
+    path_prefix: Annotated[str, Form()] = "",
+    api_base: Annotated[str, Form()] = "https://api.github.com",
+):
+    _campaign, member = require_member(db, campaign_id, user)
+    if member.role != "gm":
+        raise HTTPException(403, "Only the GM can configure GitHub export")
+    repo = repo.strip()
+    if repo.count("/") != 1:
+        raise HTTPException(400, "Repo must be in owner/name form")
+    cfg = db.query(models.GithubExport).filter_by(campaign_id=campaign_id).first()
+    if cfg is None:
+        cfg = models.GithubExport(campaign_id=campaign_id, repo=repo, token=token)
+        db.add(cfg)
+    cfg.repo = repo
+    cfg.branch = branch.strip() or "main"
+    cfg.path_prefix = path_prefix.strip()
+    cfg.api_base = api_base.strip() or "https://api.github.com"
+    # Keep the existing token if the field was left blank on re-save.
+    if token.strip():
+        cfg.token = token.strip()
+    db.commit()
+    return RedirectResponse(f"/campaigns/{campaign_id}", status_code=303)
+
+
+@router.post("/campaigns/{campaign_id}/github/push")
+def push_github(db: DbDep, user: UserDep, campaign_id: int):
+    _campaign, member = require_member(db, campaign_id, user)
+    if member.role != "gm":
+        raise HTTPException(403, "Only the GM can push to GitHub")
+    cfg = db.query(models.GithubExport).filter_by(campaign_id=campaign_id).first()
+    if cfg is None or not cfg.token:
+        raise HTTPException(409, "Configure GitHub export first")
+    cfg.last_status = "Pushing…"
+    db.commit()
+    threading.Thread(
+        target=github_export.run_export, args=(SessionLocal, campaign_id), daemon=True
+    ).start()
     return RedirectResponse(f"/campaigns/{campaign_id}", status_code=303)
 
 

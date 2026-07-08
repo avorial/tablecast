@@ -66,7 +66,8 @@ Working list, ordered within each bucket. The phase map lives in
       episodes are the built podcast bundles; GM can rotate the URL to revoke
 - [x] Foundry VTT journal export — array of JournalEntry docs (v10+), one per
       session (recap/markers/transcript pages) plus a Cast & Places entry
-- [ ] GitHub commit export of session pages
+- [x] GitHub commit export of session pages — per-campaign repo/token config,
+      commits a Markdown page per session + index via the Contents API
 - [ ] Discord import (historical recordings/logs). Target
       [Craig](https://github.com/CraigChat/craig) multi-track exports as the
       primary ingest format — per-speaker tracks map 1:1 onto Tablecast's

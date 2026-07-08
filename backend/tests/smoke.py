@@ -75,6 +75,41 @@ def start_stub_llm():
     return server
 
 
+GH_PORT = int(os.environ.get("SMOKE_PORT", "8399")) + 2
+GH_PUT_FILES = {}  # path -> content (decoded)
+
+
+def start_stub_github():
+    """Minimal GitHub Contents API: GET returns 404 (new file), PUT records
+    the decoded content and returns 201."""
+    import base64
+    import http.server
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b'{"message":"Not Found"}')
+
+        def do_PUT(self):
+            raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            body = json.loads(raw)
+            path = self.path.split("/contents/", 1)[1].split("?")[0]
+            GH_PUT_FILES[path] = base64.b64decode(body["content"]).decode()
+            self.send_response(201)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"content":{"sha":"deadbeef"}}')
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", GH_PORT), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
 def step(name, ok, detail=""):
     global FAILED
     print(f"{'PASS' if ok else 'FAIL'}  {name}  {detail}")
@@ -473,6 +508,36 @@ async def main():
     r = player.post(f"/campaigns/{cid}/feed/rotate")
     step("player can't rotate feed", r.status_code == 403)
 
+    # --- Phase 4: GitHub commit export (against a stub Contents API) ---
+    r = player.post(f"/campaigns/{cid}/github/config",
+                    data={"repo": "x/y", "token": "t"})
+    step("player can't configure github", r.status_code == 403)
+    r = gm.post(f"/campaigns/{cid}/github/config",
+                data={"repo": "badrepo", "token": "t"})
+    step("github config rejects bad repo", r.status_code == 400)
+    r = gm.post(f"/campaigns/{cid}/github/config",
+                data={"repo": "me/campaign", "token": "ghp_stubtoken",
+                      "path_prefix": "sessions",
+                      "api_base": f"http://127.0.0.1:{GH_PORT}"})
+    step("gm configures github export", r.status_code == 303)
+    GH_PUT_FILES.clear()
+    r = gm.post(f"/campaigns/{cid}/github/push")
+    step("gm triggers github push", r.status_code == 303)
+    for _ in range(40):
+        if any(p.startswith("sessions/") for p in GH_PUT_FILES):
+            break
+        time.sleep(0.25)
+    step("github export committed README + session page",
+         "sessions/README.md" in GH_PUT_FILES
+         and any(p.endswith(".md") and "README" not in p for p in GH_PUT_FILES),
+         str(list(GH_PUT_FILES)))
+    step("committed session page has transcript",
+         any("customs office" in c for c in GH_PUT_FILES.values()))
+    r = gm.get(campaign_url)
+    step("github status shown after push", "Pushed" in r.text)
+    r = player.post(f"/campaigns/{cid}/github/push")
+    step("player can't push to github", r.status_code == 403)
+
     # --- Phase 3: aligned audio + podcast bundle (needs real ffmpeg) ---
     if have_ffmpeg():
         await podcast_flow(gm, player, cid, gm_cookie)
@@ -561,6 +626,7 @@ async def podcast_flow(gm, player, cid, gm_cookie):
 
 if __name__ == "__main__":
     stub_llm = start_stub_llm()
+    stub_gh = start_stub_github()
     with tempfile.TemporaryDirectory() as tmp:
         server = start_server(tmp)
         try:
@@ -574,4 +640,5 @@ if __name__ == "__main__":
             except subprocess.TimeoutExpired:
                 server.kill()
             stub_llm.shutdown()
+            stub_gh.shutdown()
     sys.exit(1 if FAILED else 0)
